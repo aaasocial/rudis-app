@@ -1,6 +1,6 @@
 # Rudis
 
-**A Windows video editor for people who have never edited a video.**
+**A Windows video editor for people who have never edited a video. If you can type, you can cut.**
 
 [![Latest release](https://img.shields.io/github/v/release/aaasocial/rudis-app?label=release)](https://github.com/aaasocial/rudis-app/releases/latest)
 [![Licence: AGPL-3.0-only](https://img.shields.io/badge/licence-AGPL--3.0--only-blue)](LICENSE)
@@ -19,6 +19,12 @@ standard tools.
 - **Offline by default:** import, edit and export need no account, no key and no network.
 - **Optional AI:** an agent (Anthropic) and generation (Runway) with your own API keys;
   offline transcription for remove-words editing and subtitles.
+- **Sketch it on the frame:** draw on the Canvas, and the agent builds what you drew.
+
+![Demo, sped up: one prompt plus numbered boxes drawn on the frame, and the agent places eight clips as timed overlays on eight new tracks](.github/readme/canvas-agent-demo.gif)
+
+*One prompt and a sketch: the agent matches eight clips to the numbered boxes and lays them out
+as timed overlays (sped up).*
 
 Rudis is a native WinUI 3 app over a Rust engine, with an LGPL build of FFmpeg run as a separate
 process. It runs on Windows only and is tested on Windows 10/11 x64.

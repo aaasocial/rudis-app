@@ -6,7 +6,7 @@
 [![Licence: AGPL-3.0-only](https://img.shields.io/badge/licence-AGPL--3.0--only-blue)](LICENSE)
 ![Platform: Windows 10/11 x64](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6)
 
-![Rudis editor: three clips on the timeline, and the agent has just split the third one on request](.github/readme/rudis-editor.png)
+![Rudis editor: the agent has built a 20-second montage on the timeline from an imported folder of clips](.github/readme/rudis-editor.jpg)
 
 Import a video, cut it on a timeline, fix the sound, and export a real file. Every edit works on
 the actual video data, so what you see in the preview is what you get on disk. If you want help,

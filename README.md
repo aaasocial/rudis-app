@@ -1,17 +1,42 @@
 # Rudis
 
-Rudis is a Windows desktop video editor for people with no editing experience. You import a real
-video file, preview real decoded frames, arrange it on a timeline (trim, split, rearrange), adjust
-the audio (volume, detach), and export a real file to disk that reflects every edit. An optional
-in-app agent and a Canvas (a whiteboard you can sketch on) drive the same real timeline as the
-standard editing tools. Rudis is licensed **AGPL-3.0-only**. It runs on Windows only: a native
-WinUI 3 shell over a Rust engine, with an LGPL build of FFmpeg run as a separate sidecar process.
+**A Windows video editor for people who have never edited a video.**
 
-Tested on Windows 10/11 x64.
+[![Latest release](https://img.shields.io/github/v/release/aaasocial/rudis-app?label=release)](https://github.com/aaasocial/rudis-app/releases/latest)
+[![Licence: AGPL-3.0-only](https://img.shields.io/badge/licence-AGPL--3.0--only-blue)](LICENSE)
+![Platform: Windows 10/11 x64](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6)
+
+![Rudis editor: three clips on the timeline, and the agent has just split the third one on request](.github/readme/rudis-editor.png)
+
+Import a video, cut it on a timeline, fix the sound, and export a real file. Every edit works on
+the actual video data, so what you see in the preview is what you get on disk. If you want help,
+an optional in-app agent and a Canvas (a whiteboard you sketch on) drive the same timeline as the
+standard tools.
+
+- **Edit:** trim, split and rearrange clips on a timeline, with a preview of real decoded frames.
+- **Audio:** change clip volume, or detach the audio from its video.
+- **Export:** H.264/HEVC through your GPU's hardware encoder or Windows Media Foundation.
+- **Offline by default:** import, edit and export need no account, no key and no network.
+- **Optional AI:** an agent (Anthropic) and generation (Runway) with your own API keys;
+  offline transcription for remove-words editing and subtitles.
+
+Rudis is a native WinUI 3 app over a Rust engine, with an LGPL build of FFmpeg run as a separate
+process. It runs on Windows only and is tested on Windows 10/11 x64.
+
+**[Download](#download-and-install)** · [Build from source](#build-from-source) ·
+[API keys](#api-keys-optional) · [Troubleshooting](#troubleshooting) · [Licence](#licence)
 
 ## Download and install
 
-Prebuilt binaries are on the Releases page of this repository. Each release carries:
+1. Open the [latest release](https://github.com/aaasocial/rudis-app/releases/latest) and download
+   `Rudis-win-Setup.exe`.
+2. Run it. Windows SmartScreen shows **"Windows protected your PC"** because the installer is not
+   code-signed (see below). Click **More info**, then **Run anyway**.
+3. Rudis installs for your user only, with no administrator rights, and starts.
+
+To uninstall, use *Apps & features* (the entry is named `Rudis`).
+
+Each release carries:
 
 | Asset | What it is |
 |-------|------------|
@@ -19,14 +44,16 @@ Prebuilt binaries are on the Releases page of this repository. Each release carr
 | `Rudis-win-Portable.zip` | The same app without an installer: unzip anywhere and run `Rudis.exe`. |
 | `SHA256SUMS.txt` | One line per file above: its SHA-256 hash and its name, in `sha256sum` format. |
 
-**The binaries are not code-signed.** Rudis is open source and has no paid code-signing
-certificate, so Windows SmartScreen shows **"Windows protected your PC"** the first time you run
-`Rudis-win-Setup.exe`. Click **More info**, then **Run anyway**. The warning is about the missing
-signature, not about what the installer does: it installs for your user only and asks for no
-administrator rights.
+### Why the SmartScreen warning
 
-**Verify what you downloaded.** Compare each file's hash with its line in `SHA256SUMS.txt` from the
-same release. In Windows PowerShell, in the folder you downloaded to:
+Rudis is open source and has no paid code-signing certificate. The warning is about the missing
+signature, not about what the installer does. A free open-source signing programme such as
+SignPath Foundation is a possible future option; nothing is planned.
+
+### Verify your download
+
+Compare each file's hash with its line in `SHA256SUMS.txt` from the same release. In Windows
+PowerShell, in the folder you downloaded to:
 
 ```powershell
 Get-FileHash .\Rudis-win-Setup.exe -Algorithm SHA256
@@ -38,36 +65,69 @@ line in `SHA256SUMS.txt`. In Git Bash or WSL, with the downloads and `SHA256SUMS
 
 A matching hash proves the file arrived intact and is the one the release lists. It does not prove
 who built it: `SHA256SUMS.txt` is published next to the files it describes, so whoever could replace
-one could replace both. **Building from source (below) is the fully trusted route.** A free
-open-source signing programme such as SignPath Foundation is a possible future option; nothing is
-planned.
+one could replace both. **Building from source is the fully trusted route.**
 
-## Prerequisites
+## API keys (optional)
 
-This is what you install by hand. The next section verifies each item and fails by name if one is
-missing.
+The editor works fully with no key at all. Two optional features take keys: the **agent**
+(Anthropic, keys from [console.anthropic.com](https://console.anthropic.com)) and **generation**
+(Runway, keys from [dev.runwayml.com](https://dev.runwayml.com)).
 
-| Tool | Version | Why | Install |
-|------|---------|-----|---------|
-| Windows | Windows 10 1809+ or Windows 11, x64, with a **D3D12-capable GPU** | The preview and hardware decode run on the GPU through Direct3D 12 | - |
-| **Git** | any recent | Clone the repository | git-scm.com |
-| **Visual Studio 2022 Build Tools** | *Desktop development with C++* workload (MSVC v143 + a Windows 10/11 SDK) | rustc's linker and the C parts of the Rust build need them; the Community/Professional editions with the same workload also work | visualstudio.microsoft.com |
-| **.NET SDK** | **9.0.316 or any later 9.0 SDK** (a later 9.0.3xx, or a later feature band such as 9.0.4xx) | Builds the WinUI 3 shell; `global.json` pins 9.0.316 with `rollForward: latestFeature` | dotnet.microsoft.com |
-| **Rust (stable) via rustup** | `stable` (`rust-toolchain.toml`); last verified with rustc 1.96.1 | Builds the engine and the native library the shell loads | rustup.rs |
+- **Where to enter them:** **Settings**, opened from the TitleBar app-glyph menu -> *Settings...*,
+  with `Ctrl+,`, or with the key button in the Chat panel. Save, Replace and Clear take effect
+  immediately; no restart.
+- **Where they are kept:** **Windows Credential Manager**, under the targets
+  `anthropic-api-key.rudis` and `gen-runway-api-key.rudis`.
+- **Is it working:** the Chat panel shows `connected` or `unavailable — <why>`.
+
+<details>
+<summary>Environment variables, <code>.env</code> and ElevenLabs</summary>
+
+- Precedence: Credential Manager first, then the process environment (`ANTHROPIC_API_KEY`;
+  `RUNWAY_API_KEY`, falling back to `RUNWAYML_API_SECRET`; `ELEVENLABS_API_KEY`), then none.
+- A `.env` file in the repository root (or beside the exe) is a **developer convenience**: the app
+  loads it at startup only for variables that are not already set. `dotnet publish` never
+  includes it (only the optional shortcut script in *Build from source* places it beside the exe).
+  `RUDIS_NO_DOTENV=1` disables it.
+- ElevenLabs (voice) has no Settings UI; set `ELEVENLABS_API_KEY` (environment or `.env`). A
+  `gen-elevenlabs-api-key.rudis` Credential Manager entry, if present, takes precedence over it.
+
+</details>
+
+## Where your files live
+
+| What | Where |
+|------|-------|
+| Projects | `%APPDATA%\app.rudis.desktop\projects` |
+| Caches | `%LOCALAPPDATA%\app.rudis.desktop` |
+| Installed app | `%LOCALAPPDATA%\Rudis` |
+
+## Build from source
+
+Building from source is for contributors, and for anyone who wants a binary they built themselves.
+Steps 1–4 are run top to bottom in **Windows PowerShell** from the repository root; every block is
+copy-paste and none is optional.
+
+### Prerequisites
+
+Install these by hand. Step 1 checks each one and fails by name if one is missing.
+
+| Tool | Version | Why |
+|------|---------|-----|
+| Windows | Windows 10 1809+ or Windows 11, x64, with a **D3D12-capable GPU** | The preview and hardware decode run on the GPU through Direct3D 12 |
+| [**Git**](https://git-scm.com) | any recent | Clone the repository |
+| [**Visual Studio 2022 Build Tools**](https://visualstudio.microsoft.com/downloads/) | *Desktop development with C++* workload (MSVC v143 + a Windows 10/11 SDK) | rustc's linker and the C parts of the Rust build need them; the Community/Professional editions with the same workload also work |
+| [**.NET SDK**](https://dotnet.microsoft.com/download/dotnet/9.0) | **9.0.316 or any later 9.0 SDK** (a later 9.0.3xx, or a later feature band such as 9.0.4xx) | Builds the WinUI 3 shell; `global.json` pins 9.0.316 with `rollForward: latestFeature` |
+| [**Rust (stable) via rustup**](https://rustup.rs) | `stable` (`rust-toolchain.toml`); last verified with rustc 1.96.1 | Builds the engine and the native library the shell loads |
 
 You also need about 10 GB of free disk and a network connection for the build (crates.io, NuGet,
 and the three pinned downloads below). Clone to a SHORT path such as `C:\src\Rudis`: Windows'
 260-character path limit bites deep build trees.
 
 ```text
-git clone <repository-url> Rudis
+git clone https://github.com/aaasocial/rudis-app.git Rudis
 cd Rudis
 ```
-
-## Build from source
-
-Run every block below in **Windows PowerShell** from the repository root, top to bottom. Each block
-is copy-paste; nothing in this section is optional.
 
 ### 1. Check the prerequisites
 
@@ -100,9 +160,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\fetch-ffmpeg
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\fetch-lgpl-ffmpeg.ps1
 ```
 
-- `fetch-libclang18.ps1` installs libclang 18.1.1 into `crates\engine\libclang\` (used by the Rust build's bindgen; without it the build stops and names this script).
-- `fetch-ffmpeg-devlibs.ps1` installs the FFmpeg 8.0.1 LGPL development libraries into `crates\engine\ffmpeg-dev\` (the hardware-decode preview path links them).
-- `fetch-lgpl-ffmpeg.ps1` installs the LGPL FFmpeg sidecar (`ffmpeg.exe`, `ffprobe.exe` and their DLLs) into `runtime\binaries\` (what the app runs for decode, encode and export; published beside the exe).
+| Script | Installs | Into | Used for |
+|--------|----------|------|----------|
+| `fetch-libclang18.ps1` | libclang 18.1.1 | `crates\engine\libclang\` | The Rust build's bindgen; without it the build stops and names this script |
+| `fetch-ffmpeg-devlibs.ps1` | FFmpeg 8.0.1 LGPL development libraries | `crates\engine\ffmpeg-dev\` | Linked by the hardware-decode preview path |
+| `fetch-lgpl-ffmpeg.ps1` | The LGPL FFmpeg sidecar (`ffmpeg.exe`, `ffprobe.exe` and their DLLs) | `runtime\binaries\` | What the app runs for decode, encode and export; published beside the exe |
+
+**Optional features.** Two more fetches are not part of the build. Without them, the features
+they enable report themselves unavailable and everything else works. Both are hundreds of MB. Run
+them now, before step 3, or re-run step 3 afterwards, because publish copies `runtime\binaries`
+into `dist\Rudis\binaries`.
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\fetch-whisper-cli.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\fetch-opencv-sdk.ps1
+```
+
+- `fetch-whisper-cli.ps1` installs whisper-cli and the ggml-small model: offline transcription,
+  remove-words editing and subtitles.
+- `fetch-opencv-sdk.ps1` installs the OpenCV sidecar (an embeddable Python with OpenCV): motion
+  tracking.
 
 ### 3. Build and publish
 
@@ -124,87 +201,45 @@ dotnet publish shell\Rudis.Shell\Rudis.Shell.csproj -c Release -p:Platform=x64 -
 Start-Process -FilePath .\dist\Rudis\Rudis.Shell.exe
 ```
 
-## Run
+From then on, launch `dist\Rudis\Rudis.Shell.exe` directly. After pulling changes, re-run step 3.
 
-After the first build, launch `dist\Rudis\Rudis.Shell.exe` directly. After pulling changes, re-run
-step 3 of the build.
-
-The app stores projects under `%APPDATA%\app.rudis.desktop\projects` and caches under
-`%LOCALAPPDATA%\app.rudis.desktop`.
-
-As an optional convenience, this script publishes the app and creates a desktop shortcut:
+**Optional desktop shortcut.** This script publishes the app and creates a desktop shortcut:
 
 ```text
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\install-desktop-shortcut.ps1
 ```
 
-It also links your repository `.env` (which may hold plaintext API keys) into `dist\Rudis`
-beside the exe, as a hardlink, or as a copy if a hardlink is not possible. Do not zip or share
-`dist\Rudis` as-is after running it.
-
-No keys, no account and no network are needed to import, edit and export.
-
-## API keys (optional)
-
-The editor works fully with no key at all: import, edit and export, offline. Two optional features
-take keys: the **agent** (Anthropic) and **generation** (Runway).
-
-- Enter them in **Settings**: the TitleBar app-glyph menu -> *Settings...*, `Ctrl+,`, or the key
-  button in the Chat panel. Keys are held by **Windows Credential Manager** (targets
-  `anthropic-api-key.rudis` and `gen-runway-api-key.rudis`). Save, Replace and Clear take effect
-  immediately; no restart.
-- Precedence: Credential Manager first, then the process environment (`ANTHROPIC_API_KEY`;
-  `RUNWAY_API_KEY`, falling back to `RUNWAYML_API_SECRET`; `ELEVENLABS_API_KEY`), then none.
-- A `.env` file in the repository root (or beside the exe) is a **developer convenience**: the app
-  loads it at startup only for variables that are not already set. `dotnet publish` never
-  includes it (only the optional shortcut script above places it beside the exe).
-  `RUDIS_NO_DOTENV=1` disables it.
-- ElevenLabs (voice) has no Settings UI; set `ELEVENLABS_API_KEY` (environment or `.env`). A
-  `gen-elevenlabs-api-key.rudis` Credential Manager entry, if present, takes precedence over it.
-- The Chat panel shows `connected` or `unavailable — <why>`.
-
-Keys are obtained from console.anthropic.com (Anthropic) and dev.runwayml.com (Runway).
-
-## Optional features
-
-These are NOT part of the build above:
-
-```text
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\fetch-whisper-cli.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\fetch-opencv-sdk.ps1
-```
-
-- `fetch-whisper-cli.ps1` installs whisper-cli and the ggml-small model: offline transcription,
-  remove-words editing and subtitles.
-- `fetch-opencv-sdk.ps1` installs the OpenCV sidecar (an embeddable Python with OpenCV): motion
-  tracking.
-
-Without them, those features report themselves unavailable; everything else works. Both are
-hundreds of MB. Run them BEFORE step 3, or re-run step 3 afterwards, because publish copies
-`runtime\binaries` into `dist\Rudis\binaries`.
-
-## Known limitations
-
-- The release binaries are not code-signed, so Windows SmartScreen warns on the first run of each
-  new release. See *Download and install* above for the *More info* -> *Run anyway* path and how
-  to verify the download.
+> [!WARNING]
+> It also links your repository `.env` (which may hold plaintext API keys) into `dist\Rudis`
+> beside the exe, as a hardlink, or as a copy if a hardlink is not possible. Do not zip or share
+> `dist\Rudis` as-is after running it.
 
 ## Troubleshooting
 
-- **The third fetch (`fetch-lgpl-ffmpeg.ps1`) fails with 404.** It downloads a pinned release from
-  a GitHub fork of FFmpeg-Builds; a 404 means the pinned release moved. Open an issue; do not point
-  the script elsewhere.
-- **The app exits immediately with code `-1073741189` and no window.** The publish is incomplete
-  (a missing `Rudis.Shell.pri` or native DLLs). Re-run step 3.
-- **Path-too-long errors from cargo or MSBuild.** Clone to a shorter path such as `C:\src\Rudis`.
-- **`dotnet --version` errors inside the clone.** Install .NET SDK 9.0.316 or any later 9.0 SDK.
-- **No window, or a black preview.** The GPU must support Direct3D 12.
+| Symptom | Cause and fix |
+|---------|---------------|
+| SmartScreen says **"Windows protected your PC"** | The binaries are not code-signed. Click **More info** -> **Run anyway**; see [Verify your download](#verify-your-download). |
+| No window, or a black preview | The GPU must support Direct3D 12. |
+| The app exits immediately with code `-1073741189` and no window | The publish is incomplete (a missing `Rudis.Shell.pri` or native DLLs). Re-run step 3. |
+| `fetch-lgpl-ffmpeg.ps1` fails with 404 | It downloads a pinned release from a GitHub fork of FFmpeg-Builds; a 404 means the pinned release moved. Open an issue; do not point the script elsewhere. |
+| Path-too-long errors from cargo or MSBuild | Clone to a shorter path such as `C:\src\Rudis`. |
+| `dotnet --version` errors inside the clone | Install .NET SDK 9.0.316 or any later 9.0 SDK. |
+
+## Known limitations
+
+- Windows only (10 1809+ or 11, x64, Direct3D 12 GPU).
+- The release binaries are not code-signed, so Windows SmartScreen warns on the first run of each
+  new release. See [Download and install](#download-and-install) for the *More info* -> *Run
+  anyway* path and how to verify the download.
+
+Found a bug? [Open an issue](https://github.com/aaasocial/rudis-app/issues).
 
 ## Licence
 
-Rudis is **AGPL-3.0-only**. `LICENSE` is the verbatim FSF text; `NOTICE.md` carries the notices,
-including that using Rudis for paid work is unrestricted (what the AGPL governs is distributing
-modified Rudis). `THIRD-PARTY-LICENSES.md` records every third-party part.
+Rudis is **AGPL-3.0-only**. [`LICENSE`](LICENSE) is the verbatim FSF text;
+[`NOTICE.md`](NOTICE.md) carries the notices, including that using Rudis for paid work is
+unrestricted (what the AGPL governs is distributing modified Rudis).
+[`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) records every third-party part.
 
 FFmpeg is an **LGPL v3** build run as a separate sidecar process, never a GPL build. H.264/HEVC
 export uses hardware / Windows Media Foundation encoders.

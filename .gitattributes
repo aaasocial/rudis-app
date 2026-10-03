@@ -1,0 +1,4 @@
+# LICENSE must stay byte-identical to the FSF AGPL-3.0 text (68-03 hashes it against the pin); no EOL conversion on any clone.
+LICENSE -text
+# 72-03 SHA256SUMS record must stay byte-identical to dist/release-10.0.0/SHA256SUMS.txt (LF only; 72-04/72-06 compare it byte-for-byte).
+.planning/phases/72-installable-and-released/artifacts/72-03-SHA256SUMS.txt -text

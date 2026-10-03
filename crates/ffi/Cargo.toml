@@ -1,0 +1,248 @@
+[package]
+# Package is named `ffi` (the bare directory name, matching `core`/`app-core`/
+# `preview` next door), so the verification gate `cargo test -p ffi` works. The
+# lib target is renamed `rudis_ffi` purely for the shipped-artifact branding:
+# it produces `rudis_ffi.dll`, the literal string the C# host's
+# `[LibraryImport("rudis_ffi")]` resolves (RESEARCH C4 — CONTEXT/ARCHITECTURE's
+# "rudis-ffi" prose is stale; 47-08 amends it).
+name = "ffi"
+version = "0.1.0"
+edition = "2021"
+# ⚠ DELIBERATE WORDING (same discipline as `crates/preview/Cargo.toml`, Phase 46
+# D-02, and `crates/app-core/Cargo.toml`'s offline guarantee). This manifest
+# names the desktop-shell framework the Rudis shell crate is built on NOWHERE —
+# not as a dependency, not in this description, not inside a comment — because a
+# literal substring gate cannot tell an explanatory mention from a real
+# dependency. Likewise it names NO network/HTTP-client crate anywhere: the C ABI
+# serves the OFFLINE CORE (CLAUDE.md), and the only sanctioned network egress
+# stays behind `agent-llm`/`agent-gen` exactly as it does for `app-core`. The
+# standalone manifest-substring guard test for this crate lands in plan 47-07
+# (`ffi_has_no_direct_network_dependencies` — the inverted-tree guard rooted at
+# the shell crate structurally cannot see a crate with no dependents).
+description = "Rudis C ABI (Phase 47): extern \"C\" surface over the AppCtx seam -- JSON envelopes, panic-guarded exports, opaque per-instance context. Additive; shell-free; offline core."
+publish = false
+license.workspace = true
+
+[lib]
+name = "rudis_ffi"
+path = "src/lib.rs"
+# D-16: the cdylib is the shipped `rudis_ffi.dll`; the rlib is what lets the
+# FFI-contract test tier (47-06) call the exports in-process with zero .NET.
+# NOTE for 47-07's export-table test: under `cargo test`, the .dll lands in
+# `target/{profile}/deps/` (NOT `target/{profile}/`) — locate it via
+# `current_exe().parent()` (RESEARCH B2, locally verified).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Domain core. Package is named `core`; its lib target is `rudis_core`, so code
+# here imports `rudis_core::...` (same declaration as `crates/app-core`).
+core = { path = "../core" }
+# The seam this whole crate wraps: `AppCtx` + the `run_*`/`*_inner` command
+# bodies (Phase 45; extended by plans 47-01/47-03).
+app-core = { path = "../app-core" }
+# `PlaybackMirror` for the hot-path scalar poll (RESEARCH A5). Shell-free by
+# construction (Phase 46), which is exactly what makes it reusable here.
+preview = { path = "../preview" }
+# `LlmTransport` bound + `KeyStore` types named by `run_agent_turn`'s
+# signatures (47-05). One of the TWO sanctioned network-egress crates; this
+# crate speaks no network protocol of its own.
+agent-llm = { path = "../agent-llm" }
+# `BackgroundMode`/`ReferenceImage` are named in `GenSubmission`'s SIGNATURES, so
+# the fail-closed impl (47-04, per D-03) cannot even be declared without it. (A
+# third, the capability enum, was named there until Phase 55.1 plan 06 deleted
+# it.) The second sanctioned egress crate; same posture as above.
+agent-gen = { path = "../agent-gen" }
+# Media engine, with `tracking` (the same feature `app-core` and the shell
+# crate already enable, so the workspace's unified feature set is unchanged by
+# this crate's arrival). `ProgressFn` appears in `AppCtx::export_progress_sink`.
+engine = { path = "../engine", features = ["tracking"] }
+# Phase 51 (SHELL-04, D-18): the C# shell's own preview host constructs its own
+# `Instance`/`Surface` and hands them to the FROZEN `engine::Compositor`, so a
+# DIRECT dependency is required — depending on `engine`/`preview` (which use
+# wgpu internally) is not enough to NAME `wgpu::Surface` in a field. Same "26"
+# spec every other workspace crate carries (`crates/engine/Cargo.toml:10`),
+# resolving to the SAME already-locked 26.0.1: D-18 pins the Phase-44/48
+# (version, DX12 backend) pair, and a bump here would re-open the MAD-0.0000
+# parity obligation against a frozen engine. Zero new lockfile weight.
+wgpu = "26"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Backs `RudisCtx`'s owned per-instance runtime for the async command exports
+# (RESEARCH E1). Same features as `crates/app-core`'s pin — no new resolved
+# version, no new workspace feature.
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+# NOT dev-only here (unlike `app-core`): `rudis_init` with a null/empty config
+# backs the ctx's directories with per-instance `TempDir`s (the `TestAppCtx`
+# pattern promoted to production for the headless host).
+tempfile = "3"
+# Plan 52-12 (F1b): the ONE composition-scale compensation
+# (`IDXGISwapChain2::SetMatrixTransform` with the inverse-scale matrix), promoted
+# out of `src/panel/surface.rs` so that BOTH of this repo's SwapChainPanel
+# surfaces share it. The mechanism was written here at 51-04 and then MISSED by
+# `crates/timeline-render`, which shipped the identical magnification bug — so
+# the durable fix is one implementation, not a second correct copy.
+#
+# UNCONDITIONAL, not target-scoped like the panel halves below, because
+# `inverse_scale_matrix` is a pure function this crate re-exports on every
+# platform (51-04's tests call it unconditionally). The shared crate scopes its
+# OWN Windows-only dependency internally and carries a non-Windows twin, so this
+# edge costs nothing off Windows. First-party path dependency — no third-party
+# licence question (PROVENANCE.md Entry 30).
+composition-scale = { path = "../composition-scale" }
+# The distributed-slice registry D-08's enforcement reads: `ffi_guard!`
+# registers every export's symbol name into `FFI_EXPORTS` in the SAME expansion
+# that wraps its body in `catch_unwind`, so registration and panic-guard cannot
+# be had separately. v0.3 (resolves 0.3.37, verified via `cargo add --dry-run`
+# 2026-07-29); MIT OR Apache-2.0.
+linkme = "0.3"
+
+[dev-dependencies]
+# tests/export_table.rs (plan 47-07): parse the built rudis_ffi.dll's PE export
+# table — the FFI-02 ground truth (D-08). Pure Rust: `dumpbin`/`llvm-readobj`
+# are confirmed ABSENT from this dev machine's PATH (RESEARCH B2), so a
+# shell-out reader would be red today. v0.39 resolves 0.39.1 (re-verified via
+# `cargo add --dry-run` 2026-07-29); MIT OR Apache-2.0, dev-only, never shipped.
+object = "0.39"
+# The D1 top-up: load the real .dll and resolve exports BY STRING — the symbol
+# name/visibility bug class the rlib call path structurally cannot catch
+# (it calls the Rust fn directly, bypassing the export table). v0.8 resolves
+# 0.8.9, ALREADY in Cargo.lock transitively — zero new lockfile weight
+# (RESEARCH D1). ISC license, dev-only, never shipped.
+libloading = "0.8"
+# CR-01's regression test (ctx.rs: the `block_on` runtime must carry the I/O
+# and timer drivers) drives a `tokio::net` loopback bind and a `tokio::time`
+# sleep — zero network egress; a live-key round trip is forbidden (offline
+# core). Dev-only feature top-up: the [dependencies] pin above is unchanged,
+# and at cdylib build time the drivers are compiled in anyway via the sanctioned
+# HTTP-speaking crate's own transitive tokio `net`/`time` features (same
+# resolved version, no new lockfile weight).
+#
+# ⚠ Do NOT name a network crate literally anywhere in this manifest — not even
+# in a comment. `offline_guard::ffi_has_no_direct_network_dependencies` is a
+# literal substring test, deliberately so; prose that names one turns it red.
+tokio = { version = "1", features = ["net", "time"] }
+# Phase 58 (plan 58-08, PROXY-04): `tests/export_proxy_isolation.rs` has to WARM
+# a real proxy cache — `proxy::generate` (the killable all-intra transcode),
+# `proxy::cache::read_fresh` (the "is it REALLY warm / REALLY deleted?" control
+# at every state transition) and `proxy::heaviness::needs_proxy` (proving the
+# fixture is media the import-time predicate would genuinely proxy). D-20 wants
+# the export-isolation claim proven on TWO REAL EXPORTED FILES, and a test that
+# faked the warm state would be proving nothing about the cache the app builds.
+#
+# DEV-ONLY, and it must stay that way: `crates/ffi` hosts `rudis_export_timeline`
+# (the one export path the C# shell dispatches), so a RUNTIME edge here would be
+# a shipped export path that can name the proxy cache — exactly the reachability
+# PROXY-04 exists to forbid. That property is now checked rather than trusted:
+# `export_proxy_cache_edge_is_dev_only_in_this_crate` in that same file reads
+# this manifest and fails if this line ever moves up into [dependencies].
+#
+# Zero new lockfile weight: `proxy` is already in this crate's graph transitively
+# (via `app-core` and `preview`, both of which depend on it for real), and it
+# declares only `engine` + serde/serde_json itself. First-party path dependency —
+# no third-party licence question.
+proxy = { path = "../proxy" }
+# Phase 59 (plan 59-09, CACHE-05): `tests/export_rendercache_isolation.rs` has to
+# WRITE real cache segments — `rendercache::SegmentEncodeSession` (the PUBLIC
+# write API, so the poison is a well-formed lie rather than a hand-forged file),
+# `rendercache::cache::read_fresh_segment` (the SHIPPED reader, asked at every
+# state transition: is the cache REALLY warm / REALLY poisoned / REALLY gone?)
+# and `rendercache::{segment_bounds, SEG_US, RENDER_CACHE_DIR_NAME}` (the grid
+# and the directory a real session uses). D-27 wants CACHE-05 proven on REAL
+# EXPORTED FILES three ways, and a test that faked the warm or poisoned state
+# would be proving nothing about the cache the app builds.
+#
+# DEV-ONLY, and it must stay that way for exactly the reason the line above says:
+# `crates/ffi` hosts `rudis_export_timeline`, so a RUNTIME edge here would be a
+# shipped export path that can name the render cache — the reachability CACHE-05
+# exists to forbid. Checked rather than trusted:
+# `export_render_cache_edge_is_dev_only_in_this_crate` in that same file reads
+# this manifest and fails if this line ever moves up into [dependencies].
+#
+# Zero new lockfile weight: `rendercache` is already in this crate's graph
+# transitively (via `app-core` and `preview`, both of which depend on it for
+# real), and it declares only `engine` + serde/serde_json itself. First-party
+# path dependency — no third-party licence question.
+rendercache = { path = "../rendercache" }
+# Phase 54.1: repo-root .env load for the #[ignore]-gated paid tier ONLY
+# (`tests/contract_generation_live.rs`). Same "0.15" the two crates that already
+# load a repo-root .env pin, so no new resolved version and no new lockfile
+# weight. Dev-only, never shipped; the FREE fixture tier
+# (`tests/contract_generation.rs`) does not name it. MIT OR Apache-2.0.
+dotenvy = "0.15"
+
+# ---------------------------------------------------------------------------
+# Phase 54.1 (plan 05): the FOURTH lock on the paid tier.
+#
+# `#[ignore]`, an in-body env guard and a separate test binary are the plan's
+# three locks. They are not enough on their own, and the gap is a money bug:
+# `cargo test -p ffi -- --include-ignored` (the green phase-gate sweep plan
+# 54.1-04's SUMMARY records, and which CI or a future plan will run again)
+# forwards `--include-ignored` to EVERY test binary in this package. On a keyed
+# machine that sweep would bill the owner as a side effect of "running the
+# tests".
+#
+# `test = false` removes this target from `cargo test -p ffi` altogether, while
+# `cargo test -p ffi --test contract_generation_live -- --ignored` still selects
+# it explicitly. The package sweep now structurally cannot reach the two paid
+# tests; only someone who NAMES this binary can.
+#
+# Auto-discovery of the other integration tests is unaffected (edition 2021
+# keeps `autotests` on when explicit `[[test]]` targets are also declared), so
+# contract.rs / contract_media.rs / export_table.rs / layout_canary.rs and
+# contract_generation.rs are still picked up automatically.
+# ---------------------------------------------------------------------------
+[[test]]
+name = "contract_generation_live"
+path = "tests/contract_generation_live.rs"
+test = false
+
+# ---------------------------------------------------------------------------
+# Phase 51 (SHELL-04): the panel hand-off's Windows-only halves.
+#
+# TARGET-SCOPED, not unconditional, because panel hosting is Windows-only BY
+# CONSTRUCTION rather than by policy: wgpu's `SurfaceTargetUnsafe::
+# SwapChainPanel` variant is `#[cfg(dx12)]` (wgpu-26.0.1/src/api/surface.rs),
+# so there is nothing off Windows for these to talk to. `src/panel/surface.rs`
+# carries a non-Windows twin of each entry point that returns a named error, so
+# the crate still builds everywhere.
+# ---------------------------------------------------------------------------
+[target.'cfg(windows)'.dependencies]
+# D-06: COM `Interface`/`GUID`/`IUnknown` for the `ISwapChainPanelNative`
+# QueryInterface. Pinned to the version `wgpu-hal` 26.0.6 itself compiles
+# against (its own manifest declares `windows-core = "0.58"`), so the COM
+# vtable and GUID layouts this crate reasons about are byte-compatible with the
+# ones wgpu uses internally — a newer major would be a SECOND, silently
+# incompatible COM ABI on the same pointer. Already resolved in the lockfile
+# transitively, so zero new packages. MIT OR Apache-2.0.
+windows-core = "0.58"
+
+# D-09/D-10's composition-scale MATRIX TRANSFORM, which has exactly one home:
+# `IDXGISwapChain2::SetMatrixTransform` on the swapchain wgpu created. A
+# `SwapChainPanel` maps ONE swapchain buffer pixel to ONE DIP, so a buffer sized
+# in PHYSICAL pixels (which is what D-10 sends across the ABI, and what keeps the
+# preview at native resolution) renders `scale`x too large and clipped without
+# the inverse transform. `wgpu-hal` does not set one — verified in the vendored
+# source at `wgpu-hal-26.0.6/src/dx12/mod.rs:1348-1355`, which calls
+# `SetSwapChain` and nothing else — so the host must, exactly as D-09 says
+# ("Rust ... applies the panel's composition-scale matrix transform").
+#
+# Both are ALREADY in the graph at these versions (wgpu 26.0.1 depends on
+# wgpu-hal 26.0.6, which depends on windows 0.58 and whose own `dx12` feature
+# already enables `Win32_Graphics_Dxgi_Common` -> `Win32_Graphics_Dxgi`), so
+# neither adds a package NOR widens a feature set. `default-features = false` on
+# wgpu-hal keeps the union exactly what wgpu already selected. MIT OR Apache-2.0.
+wgpu-hal = { version = "26", default-features = false }
+windows = { version = "0.58", features = ["Win32_Graphics_Dxgi"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# Threat T-51-01's proof needs a REAL COM object that is genuinely not an
+# `ISwapChainPanelNative`: `CreateStreamOnHGlobal` yields a live `IStream*`,
+# which is exactly the shape of caller mistake the QI exists to reject. Without
+# it, "we QueryInterface instead of transmuting" would be a claim about the
+# source rather than a property of the build. 0.59 is the version this
+# workspace already resolves (verified against Cargo.lock, 2026-07-30) — no
+# second major is introduced. Dev-only, never shipped. MIT OR Apache-2.0.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Com_StructuredStorage",
+] }

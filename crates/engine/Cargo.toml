@@ -1,0 +1,109 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis video engine: FFmpeg sidecar decode/probe/encode + wgpu offscreen compositor"
+publish = false
+license.workspace = true
+
+[dependencies]
+# wgpu 26.x: verified to build and run offscreen (no surface) on macOS/Metal.
+wgpu = "26"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# PNG encoding of decoded preview frames served over the asset protocol
+# (Phase 4). PNG-only, no other codecs. MIT OR Apache-2.0 — see PROVENANCE.md.
+# Promoted from dev-dependency (Phase 1-3 proof artifacts) to runtime dep.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Live preview-audio output (Phase 9 Wave 4): a cross-platform audio device/
+# stream API (WASAPI on Windows, CoreAudio on macOS, ALSA on Linux — selected
+# internally, no Rudis-side cfg). Apache-2.0 — see PROVENANCE.md Entry 4.
+# `crates/engine/src/audio.rs` feeds it PCM from the SAME render_audio_pcm the
+# export mix uses.
+cpal = "0.18"
+# Text shaping + line-wrapping-within-bounds + glyph rasterization to per-pixel
+# coverage (Phase 20, TEXT-01). The FontSystem is built ONLY from the bundled
+# Inter font bytes (crates/engine/assets/fonts/*.ttf via include_bytes!) —
+# load_system_fonts() is NEVER called, keeping the edit/export core offline and
+# reproducible. MIT OR Apache-2.0 — see PROVENANCE.md Entry 10.
+cosmic-text = "0.19"
+
+# --- feature `hwdecode` (Phase 48, plan 48-03; spike-proven pins from Phase 44) ---
+# In-process libav bindings for D3D11VA hardware decode (PREVIEW path only —
+# export stays on the CLI sidecar, GPU-07). Links the version-matched LGPL
+# FFmpeg under crates/engine/ffmpeg-dev/ (fetch-ffmpeg-devlibs.ps1). DYNAMIC
+# linking only (LGPL, CLAUDE.md rule 6); the link method is chosen in the root
+# .cargo/config.toml, and rusty_ffmpeg's `link_system_ffmpeg` /
+# `link_vcpkg_ffmpeg` discovery features stay OFF so nothing can silently link
+# some other FFmpeg on this machine. MIT — see PROVENANCE.md Entry 21.
+#
+# `default-features = false` + an EXPLICIT `ffmpeg8`: rsmpeg's default feature
+# set IS the FFmpeg-version selector (`default = ["ffmpeg8"]`, read from the
+# crate's own Cargo.toml), so disabling defaults without re-adding it would
+# compile rsmpeg's FFmpeg-5-era API against an avcodec-62 library. Naming it
+# explicitly keeps the version pairing auditable.
+rsmpeg = { version = "0.18", default-features = false, features = ["ffmpeg8"], optional = true }
+# =0.58.0 is LOAD-BEARING: wgpu-hal 26.0.6's texture_from_raw takes THAT crate
+# version's ID3D12Resource (48-RESEARCH.md Pitfall 2) — any other version (or
+# windows-sys) produces a type that will not unify with the signature. 0.61.3
+# also lives in Cargo.lock (cpal/tao) — that coexistence is the steady state,
+# not a conflict.
+windows = { version = "=0.58.0", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+] }
+
+[features]
+# In-process rsmpeg D3D11VA hardware decode for the PREVIEW path (Phase 48,
+# XTRC-04 clause 2). DEFAULT ON per 48-CONTEXT.md D-02; the compile-time
+# off-switch (`--no-default-features`) is one half of the SPIKE-06 re-isolation
+# fallback (the runtime kill-switch is honored at decoder-open, plans 48-05/09).
+# build.rs guards both toolchain pins LOUDLY when this feature is enabled.
+# NOTE: wgpu's two panic-on-device-loss opt-in features must stay OFF
+# (48-RESEARCH.md Pitfall 5) — device-lost is a RECOVERABLE event in Phase 48;
+# the wgpu dependency line above deliberately names no extra features.
+default = ["hwdecode"]
+hwdecode = ["dep:rsmpeg", "dep:windows"]
+# Object tracking (Phase 30, TRK-01/TRK-02). Default-off so the whole workspace
+# still builds without the tracking toolchain.
+#
+# WAVE-0 DECISION (Plan 30-01): resolved to the **FALLBACK — Python
+# opencv-contrib-python sidecar** (see crates/engine/src/tracking.rs header +
+# PROVENANCE Entry 12). The native `opencv` crate PRIMARY was ruled out because
+# the license-clean, contrib-FREE official OpenCV Windows SDK does NOT ship
+# TrackerCSRT/TrackerKCF (they live only in opencv_contrib's `tracking` module;
+# the main `video` module carries only MIL + weighted DNN trackers). SC-1
+# mandates CSRT, so the plan's FAIL->FALLBACK branch applies. The sidecar is a
+# prebuilt PSF-embeddable Python + opencv-contrib-python wheel (MIT wrapper /
+# Apache-2.0 OpenCV, weightless), invoked exactly like the ffmpeg/whisper-cli
+# sidecars -- so the feature needs NO native Rust dependency; it is a pure
+# module gate (`std::process::Command`, no `dep:` entries).
+tracking = []
+
+[dev-dependencies]
+# THROWAWAY SPIKE ONLY (Phase 9 Wave 1, examples/surface_spike.rs): a bare
+# native window to create a wgpu::Surface from. tao 0.35.3 was ALREADY locked
+# in this workspace when this dev-dep was added (it was the retired Tauri
+# shell's own windowing layer) and implements raw-window-handle 0.6 by default —
+# the plan's original suggestion (winit) is NOT in Cargo.lock and would add a
+# whole new dependency tree. Since Phase 55's GATE-07 cutover this entry is the
+# ONLY thing holding tao in the lock; the shipped shell is native C#/WinUI and
+# needs no Rust windowing crate.
+# Apache-2.0 (tauri-apps fork of winit) — dev-only, never shipped.
+tao = "0.35"
+# SC-3 headless parity gate (Phase 9 Wave 5, tests/surface_present.rs): lets the
+# frame-diff test name the surface's negotiated TextureFormat (linear
+# Bgra8Unorm, DECISIONS.md Decision 1) when building the debug compositor.
+# Same version already resolved as a runtime dep above — no new build cost.
+wgpu = "26"

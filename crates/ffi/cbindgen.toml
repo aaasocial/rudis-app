@@ -1,0 +1,45 @@
+# cbindgen configuration for the committed Rudis C ABI header (FFI-03 / D-15).
+#
+# Generator pin: cbindgen 0.29.4 (MPL-2.0, BUILD-TIME ONLY — never linked into
+# or shipped with rudis_ffi.dll; PROVENANCE.md Entry 19). The SAME pinned
+# version runs locally via scripts/windows/regen-ffi-header.ps1 and in CI
+# (47-08), because the committed header must be byte-reproducible.
+#
+# ⚠ Deliberately NO macro-expansion configuration: cbindgen's expansion mode
+# requires a nightly toolchain, and D-08's export items are written LITERALLY
+# at module level (never macro-emitted) precisely so stable cbindgen's syn
+# parser sees them (47-02's recorded design note). Enabling expansion would
+# paper over a macro-emitted export instead of failing loudly.
+
+language = "C"
+include_guard = "RUDIS_FFI_H"
+# C header that a C++ TU can also include (extern "C" wrapping under __cplusplus).
+cpp_compat = true
+# Carry Rust doc comments into the header — the memory contract LIVES in them:
+# RudisBuffer's "freed ONLY by rudis_free_buffer" text is load-bearing ABI
+# documentation for the Phase-50 C# host, not decoration (threat T-47-03).
+documentation = true
+
+header = """/* rudis_ffi.h — the Rudis C ABI contract (Phase 47, FFI-03).
+ *
+ * COMMITTED AND GENERATED — never hand-edit. Regenerate with:
+ *     & ".\\scripts\\windows\\regen-ffi-header.ps1"
+ * Drift gate (D-15): CI regenerates this header and fails on
+ *     git diff --exit-code -- crates/ffi/include/rudis_ffi.h
+ * so the committed header IS the ABI; any Rust-side signature change must
+ * land together with its regenerated header in the same commit.
+ *
+ * Memory contract: every RudisBuffer returned by this library is freed ONLY
+ * by rudis_free_buffer (same allocator). Envelopes are UTF-8 JSON:
+ * {"Ok": ..} / {"Err": ".."}; transport faults ride RudisStatus. */"""
+
+[export]
+# Two rlib-side pub consts that must NOT leak into the C contract:
+# - EVENT_NAMES: cbindgen emits it as a macro referencing the six EVENT_*
+#   &str consts it (correctly) SKIPS — a C TU expanding it would not compile.
+#   The six event-name strings are JSON payload values (the poll envelope's
+#   `event` field), not C symbols; they are documented on rudis_poll_events.
+# - DEFAULT_CAPACITY: an internal ring-sizing detail whose unprefixed name
+#   would pollute the consumer's macro namespace; D-10's resync protocol makes
+#   the capacity a non-contract implementation choice.
+exclude = ["EVENT_NAMES", "DEFAULT_CAPACITY"]

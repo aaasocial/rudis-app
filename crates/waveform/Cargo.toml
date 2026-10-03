@@ -1,0 +1,19 @@
+[package]
+name = "waveform"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis audio peak-envelope extraction (block-RMS, u8-quantised) plus a fail-closed per-media-item disk cache. SHELL-09's producer half."
+publish = false
+license.workspace = true
+
+[dependencies]
+# The FROZEN media engine (annotated tag `engine-axis-freeze`), CALLED and never
+# modified. EXACTLY two items are used -- `render_audio_pcm` and
+# `AUDIO_SAMPLE_RATE` -- both already `pub use`d at that crate's root, so this
+# dependency edge requires no change whatsoever to its manifest or its sources.
+engine = { path = "../engine" }
+serde = { version = "1", features = ["derive"] }
+# The cache file embeds its FULL key as JSON, so a filename-hash collision
+# degrades to a MISS instead of to a WRONG envelope.
+serde_json = "1"
+thiserror = "2"

@@ -1,0 +1,599 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Rudis.Shell.Regions.Chat"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    FontFamily="Calibri">
+
+    <!--
+      Chat — the region name is the handoff's, character-for-character
+      (design_handoff_rudis_editor/README.md:36,142; CLAUDE.md rule 7).
+
+      EVERY colour is a {StaticResource} token key from Theme/Tokens.xaml. A raw-hex
+      literal in this file — INCLUDING IN A COMMENT — is a build FAILURE
+      (MechanicalGatesTests.no_raw_hex_outside_the_token_dictionary).
+
+      ═══ WHAT THIS REGION IS ═══
+
+      The sixth instance of the established region pattern, over the FIVE agent
+      exports that were already wrapped before this phase started
+      (Interop/RudisNative.cs:203-230). There is NO new P/Invoke here and there is no
+      new interop anywhere in this plan: a Chat step that seems to need one has
+      misread the seam (Phase 53 D-11). `ApplyOptionCardAsync` gets its first caller
+      in this file.
+
+      It holds NO authoritative state (CLAUDE.md rule 4). The transcript is view
+      state; every project mutation an agent turn makes arrives at the Timeline and
+      MediaBin through the SAME mirror path every other command uses. There is
+      deliberately no snapshot/poll call in this region — see Chat.xaml.cs.
+
+      Every decision this file renders comes from the WinUI-FREE half beside it
+      (Regions/Chat/ChatTurnPresenter.cs, plan 54-01), which is where the parity
+      claims are asserted without a window.
+
+      ═══ FIVE DELIBERATE DEVIATIONS FROM THE HANDOFF, ALL OWNER DECISIONS ═══
+
+      Written here so none of them later reads as an oversight:
+
+        1. NO `Chat.MinimizeButton`. The handoff names it an interactive atom
+           (README:41,144) and README:164 keeps it out of the Esc rule. Both clauses
+           existed because a FLOATING panel obscured content. D-01 docks Chat into
+           the Canvas column, so it obscures nothing, and the Canvas/Chat splitter
+           (D-02) is the size control the minimize button stood in for. DROPPED by
+           D-04, deliberately.
+        2. NO drag handle (U+2837) and no float chrome — D-01 voided the floating
+           mechanics (draggable header, 300x332 default, clamp-on-resize, and the
+           float shadow). This is a docked panel in a Grid row.
+        3. Option cards render INSIDE this transcript (D-06), not in the Canvas.
+           v6.0 resolved the handoff's own ambiguity the other way (README:98 lists
+           cards under Canvas; README:147 puts them in Chat); this phase re-resolves
+           it toward Chat, so README:98's Canvas-cards clause is deliberately
+           unbuilt.
+        4. NO streaming caret and NO structured tool-call trace. The handoff's
+           States row lists a token-streaming caret; `rudis_agent_send_message` is
+           ONE-SHOT, so there is nothing mid-turn to drive either (D-17).
+        5. The status pill has TWO states, not three. v6.0's initial `connecting…`
+           was markup that `refreshChatStatus` immediately replaced; the status read
+           is a local keychain check, not a network call, so a third transient state
+           would only flash. Disconnected is the honest pre-read state.
+
+      ═══ THREE RENDERING RULES, ALL PREVIOUSLY PAID FOR (50-05) ═══
+
+      · NO width-responsive visual-state trigger. Phase 50 MEASURED that the obvious
+        XAML mechanism for one never fires in this shell; responsive is a measured
+        SizeChanged, as Toolbar.xaml.cs's ApplyResponsiveLayout does. This region
+        needs none at all — it stretches in both axes.
+      · NO PUA icon-font codepoints. The two glyphs here are plain BMP Unicode,
+        U+2726 (agent mark) and U+2191 (send) — and both were MEASURED rendered
+        before they were committed. See the note at AgentMark.
+      · NO `RadioButton` groups. If one ever lands here it needs
+        `TabFocusNavigation="Once"` on its container, or each loose button in the
+        group takes its own tab stop (the 50-05 trap).
+
+      ═══ EVERY CONTROL HERE DRIVES SOMETHING REAL (rule 1) ═══
+
+        Chat.SendButton  -> rudis_agent_send_message
+        Chat.KeyButton   -> opens Settings (MainWindow.ShowSettingsAsync)
+        the pill         <- rudis_agent_status
+        Chat.AgentStatus <- rudis_agent_status (source -> AgentStatusText, D-69-15)
+        a card's Apply   -> rudis_apply_option_card
+
+      The inline BYO-key form (the old KeyForm with its KeyInput/KeySave/KeyClear/KeyCancel)
+      was RETIRED in Phase 69 (D-69-10): the one key surface is Dialogs/SettingsDialog,
+      so there are not two key surfaces that can drift.
+
+      No button in this file ships with an inert handler: Task 2 of this same plan
+      fills every one, which is why both halves landed in one plan.
+    -->
+
+    <UserControl.Resources>
+
+        <!-- ═══ Input chrome ═══
+             The shipped TextBox/PasswordBox templates paint themselves from WinUI
+             SYSTEM brushes, which is raw hex by proxy and would make the rule-7 gate
+             meaningless for this region. Retargeting the theme resource keys onto
+             Rudis tokens is the smallest correct fix and follows the precedent plan
+             53-02 set for GridViewItem: a resource lookup inside a control template
+             walks the realized element's parent chain, and this dictionary sits on
+             that chain above every control in the region — which is why the override
+             lives here on the region rather than at app level, where it would have
+             repainted every other input in the shell.
+
+             The handoff's own stated use for `bg-elevated` is "Inputs, search", so
+             the input fill is that token and the strip BEHIND it is `bg-bar`. -->
+        <SolidColorBrush x:Key="TextControlBackground" Color="{StaticResource bg-elevated-color}" />
+        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="{StaticResource bg-elevated-color}" />
+        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="{StaticResource bg-elevated-color}" />
+        <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="{StaticResource bg-panel-color}" />
+
+        <SolidColorBrush x:Key="TextControlBorderBrush" Color="{StaticResource border-strong-color}" />
+        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="{StaticResource border-strong-color}" />
+        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="{StaticResource accent-bright-color}" />
+        <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="{StaticResource border-hairline-color}" />
+
+        <SolidColorBrush x:Key="TextControlForeground" Color="{StaticResource text-primary-color}" />
+        <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="{StaticResource text-primary-color}" />
+        <SolidColorBrush x:Key="TextControlForegroundFocused" Color="{StaticResource text-primary-color}" />
+        <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="{StaticResource text-tertiary-color}" />
+
+        <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="{StaticResource text-tertiary-color}" />
+        <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="{StaticResource text-tertiary-color}" />
+        <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="{StaticResource text-tertiary-color}" />
+        <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="{StaticResource text-tertiary-color}" />
+
+        <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="{StaticResource accent-color}" />
+        <SolidColorBrush x:Key="TextControlButtonBackground" Color="Transparent" />
+        <SolidColorBrush x:Key="TextControlButtonBackgroundPointerOver" Color="{StaticResource bg-segment-active-color}" />
+        <SolidColorBrush x:Key="TextControlButtonForeground" Color="{StaticResource text-secondary-color}" />
+        <SolidColorBrush x:Key="TextControlButtonForegroundPointerOver" Color="{StaticResource text-primary-color}" />
+        <Thickness x:Key="TextControlBorderThemeThickness">1</Thickness>
+        <Thickness x:Key="TextControlBorderThemeThicknessFocused">1</Thickness>
+
+        <!-- ═══ Brand fill: Chat.SendButton, a card's Apply ═══
+             Handoff: fill `accent`, text `on-accent`; hover `accent-bright`. Same
+             explicit token-only ControlTemplate every region since 50-05 uses, so
+             nothing inherits a WinUI system brush. Disabled resolves as
+             `bg-elevated` + `text-tertiary`, matching every other disabled control
+             in the shell (the Toolbar's recorded UI-SPEC gap-4 resolution). -->
+        <Style x:Key="ChatAccentButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource accent}" />
+            <Setter Property="Foreground" Value="{StaticResource on-accent}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-control}" />
+            <Setter Property="Padding" Value="10,0,10,0" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource accent-bright}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource accent-bright}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-elevated}" />
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              FontWeight="{TemplateBinding FontWeight}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ Flat/outlined: Chat.KeyButton ═══
+             v6.0's `chat-key-btn` treatment, given the handoff's outlined-button
+             chrome. 22px in the header band. -->
+        <Style x:Key="ChatFlatButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="BorderBrush" Value="{StaticResource border-strong}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-control}" />
+            <Setter Property="Padding" Value="8,0,8,0" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-elevated}" />
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              FontWeight="{TemplateBinding FontWeight}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ Transcript bubbles ═══
+             Built IMPERATIVELY by Chat.xaml.cs's AppendBubble (v6.0's
+             appendChatMessage idiom): an ItemsControl with a template selector buys
+             nothing here, and the imperative path keeps the "TextBlock.Text only,
+             never a markup path" rule (T-54-04) visible at its single call site.
+             The four kinds are v6.0's four CSS classes, one style pair each.
+
+             ⚠ ERROR HAS NO RED. The handoff's colour table defines no error/danger
+             token — v6.0's red was raw hex in a token-free shell. Inventing one
+             would break rule 7 the same way inventing the disconnected pill's amber
+             would (see Tokens.xaml). An error bubble is therefore `bg-elevated` with
+             a `border-strong` outline against the borderless agent bubble, and the
+             KIND is carried losslessly for UIA by the bubble's AutomationId prefix
+             (`Chat.ErrorBubble.{n}`), which is what plan 54-05's proof reads. -->
+        <Style x:Key="ChatBubbleUser" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource accent}" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-panel}" />
+            <Setter Property="Padding" Value="8,5,8,5" />
+            <Setter Property="MaxWidth" Value="320" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+        </Style>
+
+        <Style x:Key="ChatBubbleAgent" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource bg-elevated}" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-panel}" />
+            <Setter Property="Padding" Value="8,5,8,5" />
+            <Setter Property="MaxWidth" Value="320" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+
+        <Style x:Key="ChatBubbleDisclosure" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource accent-tint}" />
+            <Setter Property="BorderBrush" Value="{StaticResource border-strong}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-panel}" />
+            <Setter Property="Padding" Value="8,5,8,5" />
+            <Setter Property="MaxWidth" Value="320" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+
+        <Style x:Key="ChatBubbleError" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource bg-elevated}" />
+            <Setter Property="BorderBrush" Value="{StaticResource border-strong}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-panel}" />
+            <Setter Property="Padding" Value="8,5,8,5" />
+            <Setter Property="MaxWidth" Value="320" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+
+        <Style x:Key="ChatBubbleTextOnAccent" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource on-accent}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="IsTextSelectionEnabled" Value="True" />
+        </Style>
+
+        <Style x:Key="ChatBubbleText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource text-primary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="IsTextSelectionEnabled" Value="True" />
+        </Style>
+
+        <!-- Consolas signals "literal / verbatim quoted text", which is exactly what a
+             generation disclosure is: the prompt actually sent, the frames that
+             conditioned it, the model that ran, and the standing provider notice —
+             each on a STRUCTURAL channel because narration is known to paraphrase.
+             v6.0 used a monospace stack here for the same reason. -->
+        <Style x:Key="ChatBubbleTextDisclosure" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="IsTextSelectionEnabled" Value="True" />
+        </Style>
+
+        <!-- ═══ Option card (D-06: in this transcript, not the Canvas) ═══
+             Built imperatively by RenderCards, styled from here. `accent-tint` is
+             the handoff's own "AI/agent surfaces (avatars, suggestion card)" token
+             and the U+2726 mark in `accent-glyph` is its "✦ chip" guidance
+             (README:104) — a card must read as MODEL OUTPUT, not as chrome. -->
+        <Style x:Key="ChatOptionCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource accent-tint}" />
+            <Setter Property="BorderBrush" Value="{StaticResource border-strong}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-panel}" />
+            <Setter Property="Padding" Value="9,7,9,8" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+
+        <Style x:Key="ChatOptionCardMark" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource accent-glyph}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="ChatOptionCardLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource text-primary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="ChatOptionCardRationale" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+    </UserControl.Resources>
+
+    <!-- The region's own edge against the Canvas above it. Under D-01 the Canvas row
+         splits and Chat takes the bottom half, so this hairline IS the seam the
+         splitter (plan 54-05) sits on. -->
+    <Border Background="{StaticResource bg-panel}"
+            BorderBrush="{StaticResource border-hairline}"
+            BorderThickness="0,1,0,0">
+        <Grid x:Name="ChatRoot">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- ═══ Row 0 — the header band ═══
+                 36px to match the MediaBin header directly below it in the same
+                 column, so the two bands read as one vocabulary (README:66). -->
+            <Border Grid.Row="0"
+                    Height="36"
+                    Background="{StaticResource bg-bar}"
+                    BorderBrush="{StaticResource border-hairline}"
+                    BorderThickness="0,0,0,1"
+                    Padding="11,0,11,0"
+                    AutomationProperties.AutomationId="Chat.Header"
+                    AutomationProperties.Name="Chat header">
+                <Grid VerticalAlignment="Center">
+
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="6"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center">
+
+                        <!-- The handoff's AI mark (README:144).
+
+                             ⚠ MEASURED 2026-07-31, recorded because Phase 50 was
+                             bitten TWICE by glyph rendering and the obvious fix here
+                             would have been the wrong one. U+2726 is a BMP
+                             pictograph, so the 50-05 trap to fear is not tofu (that
+                             is the PUA failure) but a silent DirectWrite fallback to
+                             Segoe UI Emoji, which would render it as a COLOUR emoji
+                             in a monochrome UI — exactly what happened to the U+270E
+                             pencil in 50-05.
+
+                             It was rendered and LOOKED AT before being committed:
+                             U+2726 and U+2191 were drawn at 34px in three families
+                             (Calibri / SymbolThemeFontFamily / control default) and
+                             captured to a bitmap. ALL THREE render MONOCHROME, with
+                             no colour fallback and no tofu, so the inherited
+                             Calibri needs NO family swap and NO ThemeResource
+                             override — the simplest markup is also the correct one.
+                             Transcript: artifacts/54-03-winui-mechanics.md. -->
+                        <TextBlock x:Name="AgentMark"
+                                   Text="&#x2726;"
+                                   Foreground="{StaticResource accent-glyph}"
+                                   FontSize="13"
+                                   VerticalAlignment="Center" />
+
+                        <TextBlock x:Name="RegionTag"
+                                   Text="Rudis Agent"
+                                   Foreground="{StaticResource text-secondary}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   CharacterSpacing="40"
+                                   VerticalAlignment="Center"
+                                   AutomationProperties.AutomationId="Chat.RegionTag"
+                                   AutomationProperties.Name="Rudis Agent" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="6"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center">
+
+                        <!-- Chat.StatusPill — driven by rudis_agent_status'
+                             {key_configured} (D-19).
+
+                             CONNECTED uses the handoff's own `success` / `success-bg`
+                             pair, whose stated uses are literally "Connected status
+                             text" and "Connected status pill".
+
+                             DISCONNECTED uses the EXISTING neutral trio
+                             (`bg-elevated` / `border-strong` / `text-secondary`).
+                             The handoff calls this state amber but defines no
+                             amber/warning token anywhere in its colour table, and
+                             v6.0's amber was a raw-hex approximation in a token-free
+                             shell. Adding a token the handoff does not have would
+                             violate rule 7 in the other direction — the named tokens
+                             ARE the contract. Recorded here and in Tokens.xaml.
+
+                             Both colour sets and the text are applied by
+                             ApplyStatus, so the pill and its UIA Name can never
+                             disagree about which state is on screen. -->
+                        <Border x:Name="StatusPill"
+                                Background="{StaticResource bg-elevated}"
+                                BorderBrush="{StaticResource border-strong}"
+                                BorderThickness="1"
+                                CornerRadius="{StaticResource radius-control}"
+                                Padding="7,1,7,1"
+                                VerticalAlignment="Center"
+                                AutomationProperties.AutomationId="Chat.StatusPill"
+                                AutomationProperties.Name="disconnected">
+                            <TextBlock x:Name="StatusPillText"
+                                       Text="DISCONNECTED"
+                                       Foreground="{StaticResource text-secondary}"
+                                       FontSize="10"
+                                       FontWeight="SemiBold"
+                                       CharacterSpacing="50" />
+                        </Border>
+
+                        <!-- Chat.AgentStatus (Phase 69, D-69-15) - the status TEXT a proof
+                             reads: exactly `connected`, `connected (from environment
+                             variable - developer setup)` or `unavailable - no API key - add
+                             one in Settings`, from AgentStatusText.Describe. The proofs read
+                             the UIA Name (full text); the visible trimming is decoration.
+                             The pill's Name stays `connected`/`disconnected` so prior gates
+                             do not churn, and ApplyStatus sets both from one parse. -->
+                        <TextBlock x:Name="AgentStatusLabel"
+                                   Text="unavailable — no API key — add one in Settings"
+                                   Foreground="{StaticResource text-tertiary}"
+                                   FontSize="10"
+                                   VerticalAlignment="Center"
+                                   MaxWidth="180"
+                                   TextTrimming="CharacterEllipsis"
+                                   AutomationProperties.AutomationId="Chat.AgentStatus"
+                                   AutomationProperties.Name="unavailable — no API key — add one in Settings"
+                                   ToolTipService.ToolTip="unavailable — no API key — add one in Settings" />
+
+                        <!-- Content is set by ApplyStatus: `Change key` when a key is
+                             configured, `Reconnect` when it is not (v6.0's exact two
+                             labels). It starts at `Reconnect` because that is the
+                             pre-read state the pill also shows. -->
+                        <Button x:Name="KeyButton"
+                                Style="{StaticResource ChatFlatButtonStyle}"
+                                Content="Reconnect"
+                                Click="OnKeyButtonClick"
+                                AutomationProperties.AutomationId="Chat.KeyButton"
+                                AutomationProperties.Name="Reconnect"
+                                ToolTipService.ToolTip="Open Settings to connect or change your Anthropic API key" />
+
+                        <!-- The handoff's minimize atom would sit HERE, and is
+                             deliberately absent: deviation 1 in this file's header
+                             names it in full and records D-04's reasoning. It is
+                             written down rather than merely skipped, so a
+                             handoff-conformance review reads a decision rather than
+                             an omission. -->
+
+                        <!-- No drag handle either (deviation 2) — this is a docked
+                             panel in a Grid row, not a floating card. -->
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ═══ Row 1 — the transcript, with the empty state overlaid ═══ -->
+            <Grid Grid.Row="1">
+
+                <ScrollViewer x:Name="TranscriptScroll"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollMode="Disabled"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="TranscriptPanel"
+                                Spacing="6"
+                                Padding="8"
+                                AutomationProperties.AutomationId="Chat.Transcript"
+                                AutomationProperties.Name="Chat transcript" />
+                </ScrollViewer>
+
+                <!-- The handoff gives this copy verbatim (README:144): a centered
+                     U+2726 above the hint. Its reference to sketching on the canvas
+                     is still TRUE under D-01 — the Canvas sits directly above this
+                     region, sharing the column. The AutomationProperties.Name is the
+                     same string because plan 54-05's UIA proof reads it verbatim. -->
+                <StackPanel x:Name="EmptyState"
+                            Spacing="8"
+                            Padding="24,0,24,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="Chat.EmptyState"
+                            AutomationProperties.Name="Ask Rudis to edit your video, or sketch an idea on the canvas.">
+                    <TextBlock Text="&#x2726;"
+                               Foreground="{StaticResource accent-glyph}"
+                               FontSize="20"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="Ask Rudis to edit your video, or sketch an idea on the canvas."
+                               Foreground="{StaticResource text-tertiary}"
+                               FontSize="12"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center" />
+                </StackPanel>
+            </Grid>
+
+            <!-- ═══ Row 2 — Chat › Composer ═══ -->
+            <Border Grid.Row="2"
+                    Background="{StaticResource bg-bar}"
+                    BorderBrush="{StaticResource border-hairline}"
+                    BorderThickness="0,1,0,0"
+                    Padding="8">
+                <Grid ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- ⚠ PreviewKeyDown, NOT KeyDown — MEASURED, and the obvious
+                         answer is the WRONG one. A multiline TextBox marks Enter
+                         HANDLED before any instance KeyDown handler runs, so a
+                         `KeyDown="..."` handler never fires for Enter at all and the
+                         newline lands regardless. Full transcript and the four other
+                         cases in Chat.xaml.cs's OnComposerPreviewKeyDown. -->
+                    <TextBox x:Name="ComposerInput"
+                             Grid.Column="0"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MaxHeight="96"
+                             PlaceholderText="Ask Rudis or sketch&#x2026;"
+                             FontSize="12"
+                             CornerRadius="{StaticResource radius-control}"
+                             PreviewKeyDown="OnComposerPreviewKeyDown"
+                             AutomationProperties.AutomationId="Chat.Composer"
+                             AutomationProperties.Name="Message Rudis" />
+
+                    <!-- Chat.SendButton is a HANDOFF NAME (README:41,144) — keep it
+                         exact. U+2191, measured monochrome; see AgentMark above. -->
+                    <Button x:Name="SendButton"
+                            Grid.Column="1"
+                            Style="{StaticResource ChatAccentButtonStyle}"
+                            Content="&#x2191;"
+                            FontSize="14"
+                            MinWidth="32"
+                            VerticalAlignment="Bottom"
+                            Click="OnSendClick"
+                            AutomationProperties.AutomationId="Chat.SendButton"
+                            AutomationProperties.Name="Send"
+                            ToolTipService.ToolTip="Send (Enter; Shift+Enter for a new line)" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</UserControl>

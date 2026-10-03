@@ -1,0 +1,243 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+      THE ONLY FILE IN shell/ WHERE RAW HEX IS LEGAL (CLAUDE.md rule 7).
+      Token names are design_handoff_rudis_editor/README.md's, character-for-character.
+      Gap resolutions per 50-UI-SPEC.md §1: scrub-played→on-accent,
+      hover(accent)→accent-bright, hover(flat)→bg-elevated, focus ring→accent-bright,
+      radius-panel→4.
+
+      Every colour token is defined ONCE as a Color (key `{token}-color`) and consumed
+      through its SolidColorBrush twin (key = the handoff token name, exactly). XAML
+      elsewhere in shell/ references `{StaticResource token-name}` — never a literal.
+
+      Metric keys: the handoff's "Sizing constants" give values without token names
+      (TitleBar 40 · Toolbar 52 · Transport 44 · window-control hit 46 · toolbar gap 8 ·
+      transport main-group gap 16); the metric key names below are therefore this
+      file's, recorded here as the canonical shell vocabulary for them.
+    -->
+
+    <!-- ═══ Colour ═══ -->
+
+    <Color x:Key="bg-window-color">#101116</Color>
+    <SolidColorBrush x:Key="bg-window" Color="{StaticResource bg-window-color}" />
+
+    <!-- "Body / Canvas grid base" (handoff token table). Added by plan 51-04 with
+         `text-faint` so Tokens.xaml is edited in ONE wave: the Canvas region (plan
+         51-05) needs both, and two plans amending the same dictionary is how a
+         token ends up defined twice with different values. -->
+    <Color x:Key="bg-app-color">#131419</Color>
+    <SolidColorBrush x:Key="bg-app" Color="{StaticResource bg-app-color}" />
+
+    <!-- "MediaBin, Chat, cards (elevated)" (handoff token table). Added by plan
+         52-06 as the Timeline's ALTERNATING lane band: an audio lane sitting on
+         `bg-panel` beneath a video lane on `bg-app` is separable at a glance without
+         a heavier separator than the handoff's own hairline.
+
+         SECOND CONSUMER, recorded rather than left to a reader to discover: plan
+         51-06's two ContentDialogs (Dialogs/ExportDialog.xaml,
+         Dialogs/RemoveTrackDialog.xaml) use it as their SURFACE colour — the
+         handoff's own "cards (elevated)" role. That surface colour is also the
+         MEASURE the D-14 layering proofs assert on, so a change to this value
+         changes what `LayeringProofTests` looks for. -->
+    <Color x:Key="bg-panel-color">#1C1D23</Color>
+    <SolidColorBrush x:Key="bg-panel" Color="{StaticResource bg-panel-color}" />
+
+    <Color x:Key="bg-bar-color">#1A1B21</Color>
+    <SolidColorBrush x:Key="bg-bar" Color="{StaticResource bg-bar-color}" />
+
+    <Color x:Key="bg-elevated-color">#23252E</Color>
+    <SolidColorBrush x:Key="bg-elevated" Color="{StaticResource bg-elevated-color}" />
+
+    <Color x:Key="bg-segment-active-color">#34373F</Color>
+    <SolidColorBrush x:Key="bg-segment-active" Color="{StaticResource bg-segment-active-color}" />
+
+    <Color x:Key="bg-preview-color">#0B0C0F</Color>
+    <SolidColorBrush x:Key="bg-preview" Color="{StaticResource bg-preview-color}" />
+
+    <Color x:Key="border-hairline-color">#24262F</Color>
+    <SolidColorBrush x:Key="border-hairline" Color="{StaticResource border-hairline-color}" />
+
+    <Color x:Key="border-strong-color">#2C2E38</Color>
+    <SolidColorBrush x:Key="border-strong" Color="{StaticResource border-strong-color}" />
+
+    <!-- "Timeline track separators" — the handoff's own stated use for this token
+         (handoff token table). Added by plan 52-06. -->
+    <Color x:Key="border-subtle-color">#1F2128</Color>
+    <SolidColorBrush x:Key="border-subtle" Color="{StaticResource border-subtle-color}" />
+
+    <Color x:Key="text-primary-color">#ECEDF2</Color>
+    <SolidColorBrush x:Key="text-primary" Color="{StaticResource text-primary-color}" />
+
+    <Color x:Key="text-secondary-color">#A0A4B2</Color>
+    <SolidColorBrush x:Key="text-secondary" Color="{StaticResource text-secondary-color}" />
+
+    <Color x:Key="text-tertiary-color">#6F7484</Color>
+    <SolidColorBrush x:Key="text-tertiary" Color="{StaticResource text-tertiary-color}" />
+
+    <!-- "Region tags, neutral clip" (handoff token table + Typography: region tags
+         are 10px / 800 / letter-spacing .08em / `text-faint`). -->
+    <Color x:Key="text-faint-color">#565A67</Color>
+    <SolidColorBrush x:Key="text-faint" Color="{StaticResource text-faint-color}" />
+
+    <Color x:Key="accent-color">#6D54E8</Color>
+    <SolidColorBrush x:Key="accent" Color="{StaticResource accent-color}" />
+
+    <Color x:Key="accent-bright-color">#9C7BFF</Color>
+    <SolidColorBrush x:Key="accent-bright" Color="{StaticResource accent-bright-color}" />
+
+    <Color x:Key="on-accent-color">#FFFFFF</Color>
+    <SolidColorBrush x:Key="on-accent" Color="{StaticResource on-accent-color}" />
+
+    <!-- ═══ AI / agent surfaces (handoff token table) — added by plan 54-03 ═══
+
+         "AI glyph on tinted surfaces" and "AI/agent surfaces (avatars, suggestion
+         card)". Both are the handoff's own values and its own stated uses; the Chat
+         region is the first consumer of either, because it is the shell's first
+         agent-authored surface. `accent-glyph` inks the U+2726 agent mark in the
+         Chat header, the empty state and each option card; `accent-tint` is the fill
+         under the option cards and the disclosure bubbles, which is exactly the
+         "suggestion card" role the table names.
+
+         These are DISTINCT from `accent`/`accent-bright`, which are the BRAND ramp
+         (primary actions, selection, playhead). Keeping them separate is what lets a
+         card read as "the model produced this" rather than as "this is a button". -->
+    <Color x:Key="accent-glyph-color">#A78BFF</Color>
+    <SolidColorBrush x:Key="accent-glyph" Color="{StaticResource accent-glyph-color}" />
+
+    <Color x:Key="accent-tint-color">#2A2546</Color>
+    <SolidColorBrush x:Key="accent-tint" Color="{StaticResource accent-tint-color}" />
+
+    <!-- ═══ Connected status (handoff token table) — added by plan 54-03 ═══
+
+         "Connected status text" and "Connected status pill" — the handoff names both
+         for exactly one thing, and `Chat.StatusPill`'s CONNECTED state is it.
+
+         ⚠ THERE IS NO DISCONNECTED TWIN, DELIBERATELY. The handoff's Chat § calls the
+         disconnected pill "amber", but its colour table defines no amber/warning
+         token at all, and v6.0's amber was a raw-hex approximation written in a
+         token-free structural shell. Inventing one here would violate CLAUDE.md rule
+         7 in the other direction — the handoff's named tokens are the contract, not a
+         starting point. The disconnected pill therefore uses the existing neutral
+         trio (`bg-elevated` fill, `border-strong` border, `text-secondary` ink);
+         the reasoning is repeated at the pill's own site in Chat.xaml. -->
+    <Color x:Key="success-color">#46D88A</Color>
+    <SolidColorBrush x:Key="success" Color="{StaticResource success-color}" />
+
+    <Color x:Key="success-bg-color">#13301F</Color>
+    <SolidColorBrush x:Key="success-bg" Color="{StaticResource success-bg-color}" />
+
+    <Color x:Key="scrub-dot-color">#3B82F6</Color>
+    <SolidColorBrush x:Key="scrub-dot" Color="{StaticResource scrub-dot-color}" />
+
+    <!-- ═══ Clip palette (handoff § Design tokens, the paragraph under the colour
+         table) — added by plan 52-06 ═══
+
+         "Clip poster palette (assign per media item, cycle)". Eight entries, cycled
+         by a stable hash of the media id (TimelinePalette.PosterIndexFor) so a clip
+         keeps its colour across rebuilds, undos and app launches. The eighth is the
+         handoff's own `text-faint` value, which its colour table labels "neutral
+         clip" — so it is repeated here under a poster key rather than aliased: these
+         are two different roles that happen to share a value today, and collapsing
+         them would make a future change to one silently change the other. -->
+
+    <Color x:Key="clip-poster-1-color">#A7C7E7</Color>
+    <SolidColorBrush x:Key="clip-poster-1" Color="{StaticResource clip-poster-1-color}" />
+
+    <Color x:Key="clip-poster-2-color">#F4B5A3</Color>
+    <SolidColorBrush x:Key="clip-poster-2" Color="{StaticResource clip-poster-2-color}" />
+
+    <Color x:Key="clip-poster-3-color">#B9E4C9</Color>
+    <SolidColorBrush x:Key="clip-poster-3" Color="{StaticResource clip-poster-3-color}" />
+
+    <Color x:Key="clip-poster-4-color">#E7D3A7</Color>
+    <SolidColorBrush x:Key="clip-poster-4" Color="{StaticResource clip-poster-4-color}" />
+
+    <Color x:Key="clip-poster-5-color">#C9B8E8</Color>
+    <SolidColorBrush x:Key="clip-poster-5" Color="{StaticResource clip-poster-5-color}" />
+
+    <Color x:Key="clip-poster-6-color">#F2C9DD</Color>
+    <SolidColorBrush x:Key="clip-poster-6" Color="{StaticResource clip-poster-6-color}" />
+
+    <Color x:Key="clip-poster-7-color">#9DD3CE</Color>
+    <SolidColorBrush x:Key="clip-poster-7" Color="{StaticResource clip-poster-7-color}" />
+
+    <Color x:Key="clip-poster-8-color">#565A67</Color>
+    <SolidColorBrush x:Key="clip-poster-8" Color="{StaticResource clip-poster-8-color}" />
+
+    <!-- "audio clip fill (mint)" — the handoff's value, verbatim. -->
+    <Color x:Key="clip-audio-fill-color">#C7EBD6</Color>
+    <SolidColorBrush x:Key="clip-audio-fill" Color="{StaticResource clip-audio-fill-color}" />
+
+    <!-- ═══ OWNER OVERRIDE (2026-07-31, phase 53.1 UAT): video clips are a single deep
+         grey, not the cycled pastel posters — "deep grey instead of the mint". Sits
+         between `bg-segment-active` (#34373F) and `clip-poster-8` (#565A67) on the
+         theme's grey ladder: above every lane background, below the neutral-clip
+         grey. The poster tokens above stay — audio keeps its mint, and the cycle
+         remains available to any future per-media accent. When this fill is active
+         the clip's label/border ink is `text-secondary`, because the handoff's
+         "dark on-colour text" rule assumes a light pastel fill and would vanish
+         on this one. -->
+    <Color x:Key="clip-video-fill-color">#3D414B</Color>
+    <SolidColorBrush x:Key="clip-video-fill" Color="{StaticResource clip-video-fill-color}" />
+
+    <!-- The label/border ink over `clip-video-fill` — owner asked for "clearer /
+         dark black" over the first cut's `text-secondary` (2026-07-31). Near-black
+         rather than #000000 so it stays a colour from this theme's ladder, not a
+         hole punched in it. Contrast over #3D414B is ~2:1 — the owner chose it
+         looking at the live app; if it drifts unreadable at small sizes, this one
+         token is the whole knob. -->
+    <Color x:Key="clip-video-label-ink-color">#0F1014</Color>
+    <SolidColorBrush x:Key="clip-video-label-ink" Color="{StaticResource clip-video-label-ink-color}" />
+
+    <!-- "waveform lines rgba(27,94,60,.45)". XAML has no rgba() literal, so the
+         alpha is folded into the eight-digit #AARRGGBB form and the derivation is
+         written out HERE, in the one file where the value may legally appear, so the
+         alpha byte is auditable rather than magic:
+
+             A = round(0.45 x 255) = 115 = 73
+             R = 27  = 1B
+             G = 94  = 5E
+             B = 60  = 3C
+
+         Consumed only by the renderer's waveform pass (plan 52-08); the brush twin
+         exists to keep this file's one-Color-one-Brush convention unbroken. -->
+    <Color x:Key="clip-waveform-line-color">#731B5E3C</Color>
+    <SolidColorBrush x:Key="clip-waveform-line" Color="{StaticResource clip-waveform-line-color}" />
+
+    <!-- 53.2 D-08: the filmstrip body backdrop — the near-black behind decoded
+         tiles; shows through transparent letterbox padding as the "token-colored
+         gaps" D-08 specifies, and darker than every poster pastel so frames read
+         as content, not chrome. Below `clip-video-fill` (#3D414B) on the theme's
+         grey ladder for the same reason: a backdrop lighter than the clip it sits
+         inside would read as a highlight rather than as the space behind a
+         picture. Consumed per CLIP (TimelineFrameBuilder), never through the
+         palette struct — that ABI is frozen at 20 uints. -->
+    <Color x:Key="clip-filmstrip-backdrop-color">#14161B</Color>
+    <SolidColorBrush x:Key="clip-filmstrip-backdrop" Color="{StaticResource clip-filmstrip-backdrop-color}" />
+
+    <!-- ═══ Radius (intentionally sharp) ═══ -->
+
+    <CornerRadius x:Key="radius-window">4</CornerRadius>
+    <!-- Handoff gives radius-panel as a range (3–4); 4 chosen to match radius-window
+         (UI-SPEC gap 5's recorded resolution). -->
+    <CornerRadius x:Key="radius-panel">4</CornerRadius>
+    <CornerRadius x:Key="radius-control">3</CornerRadius>
+    <CornerRadius x:Key="radius-clip">2</CornerRadius>
+
+    <!-- ═══ Sizing constants (px) ═══ -->
+
+    <x:Double x:Key="height-TitleBar">40</x:Double>
+    <x:Double x:Key="height-Toolbar">52</x:Double>
+    <x:Double x:Key="height-Transport">44</x:Double>
+    <!-- Window-control hit target width (TitleBar ─ ▢ ✕): ≥46 wide. -->
+    <x:Double x:Key="width-window-control">46</x:Double>
+
+    <!-- ═══ Spacing ═══ -->
+
+    <x:Double x:Key="gap-toolbar">8</x:Double>
+    <x:Double x:Key="gap-transport-main-group">16</x:Double>
+
+</ResourceDictionary>

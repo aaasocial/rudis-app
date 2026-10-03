@@ -1,0 +1,519 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Rudis.Shell.Regions.Transport"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:regions="using:Rudis.Shell.Regions"
+    Height="{StaticResource height-Transport}"
+    FontFamily="Calibri">
+
+    <!--
+      Transport — the region name is the handoff's, character-for-character
+      (design_handoff_rudis_editor/README.md:33,115; CLAUDE.md rule 7).
+
+      EVERY colour and metric is a {StaticResource} token key from Theme/Tokens.xaml.
+      A raw-hex literal here is a build FAILURE (MechanicalGatesTests, plan 50-07).
+
+      Layout (handoff:118, verified against the mock's own CSS in
+      "Rudis Editor - Your Layout.html":76-86): fixed 44px on bg-preview, docked to the
+      BOTTOM of Preview, hairline top border. Frame menu pinned left; main group
+      CENTERED with gap 16; utilities pinned right (mock gap 11).
+
+      ⚠ EVERY control here either dispatches a REAL rudis_transport command or is
+      explicitly DISABLED (D-13, CLAUDE.md rule 1). Nothing is fake-functional:
+        Transport.PlayButton          -> play / pause   (toggles on playback.playing)
+        Transport.StopButton          -> pause + seek {0}
+        Transport.StepBackButton      -> step {delta_frames: -1}
+        Transport.StepForwardButton   -> step {delta_frames: +1}
+        Transport.LoopButton          -> set_looping {looping}
+        Transport.PrevClipButton      -> seek to the previous timeline clip edge
+        Transport.NextClipButton      -> seek to the next timeline clip edge
+        Transport.ProjectStartButton  -> seek {0}
+        Transport.ProjectEndButton    -> seek {duration_us}
+        Transport.Scrubber            -> seek {position_us} live while dragging
+        Transport.FrameMenu           -> NO backend; shell view-state only (UI-SPEC §3)
+        Transport.FullscreenButton    -> DISABLED: fit/crop is a Preview concern (Phase 51)
+        Transport.Timecode            -> read-only readout of the engine playhead
+        Transport.ClipEdgeIndicator   -> read-only: mirror-derived "playhead is inside a clip"
+
+      ⚠ THE PLAY HANDLER SENDS NO CLOCK TICK. See Transport.xaml.cs's OnPlayClick and
+      UI-SPEC §7 — the engine owns the clock here (D-17), and no code path in shell/
+      may send the per-frame clock command the Tauri frontend's JS loop sends.
+    -->
+
+    <UserControl.Resources>
+
+        <!-- ═══ Flat glyph button (every transport control except PlayButton) ═══
+             Handoff: glyphs `text-secondary`; DISABLED renders `text-tertiary`,
+             non-interactive (UI-SPEC §5 Transport rows). Hover on a flat control is
+             UI-SPEC gap 2 -> `bg-elevated`. -->
+        <Style x:Key="TransportGlyphButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-control}" />
+            <Setter Property="Padding" Value="4,0,4,0" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="MinWidth" Value="26" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-elevated}" />
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontFamily="{TemplateBinding FontFamily}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ Transport.PlayButton ═══
+             Handoff: the round brand-filled centre button (mock: 30x30, radius 50%,
+             `accent` fill, `on-accent` glyph). 28px here because this region docks the
+             scrubber INSIDE its 44px budget (see the layout note below); radius-round
+             is expressed as CornerRadius = half the side, which is what 50% means for a
+             square Border. Hover -> `accent-bright` (UI-SPEC gap 2). -->
+        <Style x:Key="TransportPlayButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource accent}" />
+            <Setter Property="Foreground" Value="{StaticResource on-accent}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinWidth" Value="28" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="14">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource accent-bright}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource accent-bright}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-elevated}" />
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontFamily="{TemplateBinding FontFamily}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ Transport.Scrubber ═══
+             Mock CSS (html:74), translated into token names — deliberately WITHOUT
+             restating any hex value, because the raw-hex gate counts comments too and it
+             is right to: a hex literal in a comment is a second copy of Tokens.xaml and
+             it rots (50-07's recorded asymmetry). Track 4px translucent-white ->
+             `border-strong` (UI-SPEC §1); played portion "white" -> `on-accent`
+             (UI-SPEC gap 1's recorded resolution); the blue playhead dot -> `scrub-dot`
+             (the ONE place that token is used) with a 2px `on-accent` ring; radius 2 ->
+             `radius-clip`. Left/right padding 14 is the mock's.
+
+             The parts are found by name in Scrubber.OnApplyTemplate: TrackRect,
+             PlayedRect, Dot. Geometry is moved by a TranslateTransform on the dot and a
+             Width on the played portion — never re-created (UI-SPEC §4 rule 3). -->
+        <Style x:Key="TransportScrubberStyle" TargetType="regions:Scrubber">
+            <Setter Property="Height" Value="12" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="regions:Scrubber">
+                        <Grid Background="Transparent" Padding="14,0,14,0">
+                            <Border x:Name="TrackRect"
+                                    Height="4"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Stretch"
+                                    Background="{StaticResource border-strong}"
+                                    CornerRadius="{StaticResource radius-clip}" />
+                            <Border x:Name="PlayedRect"
+                                    Height="4"
+                                    Width="0"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Left"
+                                    Background="{StaticResource on-accent}"
+                                    CornerRadius="{StaticResource radius-clip}" />
+                            <Ellipse x:Name="Dot"
+                                     Width="10"
+                                     Height="10"
+                                     VerticalAlignment="Center"
+                                     HorizontalAlignment="Left"
+                                     Fill="{StaticResource scrub-dot}"
+                                     Stroke="{StaticResource on-accent}"
+                                     StrokeThickness="2" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <!-- The region root. `bg-preview` is SHARED with the Preview placeholder above it
+         (handoff:118) — that shared background IS the docking contract, and it needs no
+         window hosting, hole punching or airspace workaround of any kind. Phase 51
+         replaces the panel above with a SwapChainPanel and this bar does not change.
+
+         Layout note (recorded deviation): the mock floats the scrubber 4px ABOVE the
+         bar, inside Preview's own bounds. Here it docks INSIDE the 44px, at the very top
+         edge — the same visual seam, because both regions share bg-preview — because
+         Preview is a Phase 51 surface and reaching into it from this region would create
+         exactly the cross-region coupling this phase must not introduce. The 44px budget
+         is therefore 12 (scrubber lane) + 32 (control row), and the mock's 30px play
+         button becomes 28. -->
+    <!-- The root carries an AutomationId purely so the 44px height is MEASURABLE through
+         UIA (UI-SPEC §8's first parity row) instead of being asserted from the XAML. It is
+         a region container, not a control: it invokes nothing. -->
+    <Border x:Name="TransportRoot"
+            Background="{StaticResource bg-preview}"
+            BorderBrush="{StaticResource border-hairline}"
+            BorderThickness="0,1,0,0"
+            SizeChanged="OnTransportSizeChanged"
+            AutomationProperties.AutomationId="Transport.Root"
+            AutomationProperties.Name="Transport">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="12" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Transport.Scrubber — a REAL range control exposing RangeValuePattern
+                 (read + set). UI-SPEC §6.5's deliberate divergence #1. -->
+            <regions:Scrubber x:Name="Scrubber"
+                              Grid.Row="0"
+                              Style="{StaticResource TransportScrubberStyle}"
+                              TabIndex="20"
+                              IsEnabled="False"
+                              AutomationProperties.AutomationId="Transport.Scrubber"
+                              AutomationProperties.Name="Playhead position"
+                              ToolTipService.ToolTip="Drag to seek · Left/Right = ±1 frame · Home/End = start/end" />
+
+            <Grid Grid.Row="1" Padding="14,0,14,0">
+
+                <!-- LEFT: the frame/view menu (view-state only) + the error surface. -->
+                <StackPanel Orientation="Horizontal"
+                            Spacing="8"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center">
+                    <Button x:Name="FrameMenuButton"
+                            Style="{StaticResource TransportGlyphButtonStyle}"
+                            Foreground="{StaticResource text-tertiary}"
+                            TabIndex="1"
+                            AutomationProperties.AutomationId="Transport.FrameMenu"
+                            AutomationProperties.Name="Frame and view options"
+                            ToolTipService.ToolTip="Frame / view options (view state only)">
+                        <!-- Mock: `▭` 13px + `▾` 9px, gap 4. Both are plain BMP
+                             geometric shapes with NO emoji presentation, so DirectWrite
+                             resolves them as monochrome text — the opposite trap to a
+                             PUA codepoint (50-05: a PUA glyph with an absent family
+                             renders NOTHING, and an emoji-capable pictograph can come
+                             back as a COLOUR emoji). `▾` is already proven in the
+                             shipping Toolbar's "Export ▾". -->
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="&#x25AD;" FontSize="13" VerticalAlignment="Center" />
+                            <TextBlock Text="&#x25BE;" FontSize="9" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button.Flyout>
+                            <MenuFlyout Placement="Top">
+                                <!-- View state only — NO backend (UI-SPEC §3). The two
+                                     items change what this shell DISPLAYS about the
+                                     frame, nothing in the project. -->
+                                <ToggleMenuFlyoutItem x:Name="FrameMenuSafeAreas"
+                                                      Text="Show safe areas"
+                                                      Click="OnFrameMenuItemClick"
+                                                      AutomationProperties.AutomationId="Transport.FrameMenu.SafeAreas"
+                                                      AutomationProperties.Name="Show safe areas" />
+                                <ToggleMenuFlyoutItem x:Name="FrameMenuTimecodeMs"
+                                                      Text="Millisecond timecode"
+                                                      IsChecked="True"
+                                                      Click="OnFrameMenuItemClick"
+                                                      AutomationProperties.AutomationId="Transport.FrameMenu.TimecodeMs"
+                                                      AutomationProperties.Name="Millisecond timecode" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+
+                    <!-- UI-SPEC §5 error row: a backend refusal must be VISIBLE, never
+                         swallowed, AND a transport FAULT (RudisStatus != Ok, e.g.
+                         PanicCaught) must be DISTINGUISHABLE from a domain error.
+                         Two visuals, both token-only: a domain error is text-secondary
+                         on bg-elevated; a fault is on-accent on an `accent` fill with an
+                         "ENGINE FAULT" prefix. (No red/danger token exists anywhere in
+                         the handoff — recorded as a gap rather than inventing hex,
+                         which rule 7 forbids.) -->
+                    <Border x:Name="StatusBanner"
+                            Visibility="Collapsed"
+                            Background="{StaticResource bg-elevated}"
+                            CornerRadius="{StaticResource radius-control}"
+                            Padding="8,2,8,2"
+                            MaxWidth="240"
+                            VerticalAlignment="Center">
+                        <TextBlock x:Name="StatusBannerText"
+                                   Foreground="{StaticResource text-secondary}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   AutomationProperties.AutomationId="Transport.StatusBanner"
+                                   AutomationProperties.Name="Transport status" />
+                    </Border>
+                </StackPanel>
+
+                <!-- CENTER: the main group. Mock (html:79): one flex row,
+                     `gap:16px; margin:0 auto` over ALL of `‹ ● › ⏮ ◀ ■ (▶) ⏭ ↻` — so
+                     gap-transport-main-group applies between every item, which is what
+                     that token means. `‹ ● ›` (the clip-edge cluster) keeps the mock's
+                     tighter internal spacing. -->
+                <StackPanel x:Name="MainGroup"
+                            Orientation="Horizontal"
+                            Spacing="{StaticResource gap-transport-main-group}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+
+                    <!-- ‹ ● › clip-edge nav: seek to the adjacent TIMELINE clip
+                         boundary, derived from the mirror (UI-SPEC §3). -->
+                    <StackPanel x:Name="ClipEdgeNav" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                        <Button x:Name="PrevClipButton"
+                                Style="{StaticResource TransportGlyphButtonStyle}"
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                FontSize="11"
+                                Content="&#xE76B;"
+                                Click="OnPrevClipClick"
+                                TabIndex="2"
+                                AutomationProperties.AutomationId="Transport.PrevClipButton"
+                                AutomationProperties.Name="Previous clip edge"
+                                ToolTipService.ToolTip="Previous clip edge" />
+                        <!-- Read-only indicator, not a control: `accent` when the
+                             playhead sits inside a timeline clip, `text-tertiary`
+                             otherwise. Mirror-derived state, so it is real rather than
+                             decorative; not focusable and not invokable. -->
+                        <Ellipse x:Name="ClipEdgeIndicator"
+                                 Width="5"
+                                 Height="5"
+                                 VerticalAlignment="Center"
+                                 Fill="{StaticResource text-tertiary}"
+                                 AutomationProperties.AutomationId="Transport.ClipEdgeIndicator"
+                                 AutomationProperties.Name="Playhead inside clip indicator" />
+                        <Button x:Name="NextClipButton"
+                                Style="{StaticResource TransportGlyphButtonStyle}"
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                FontSize="11"
+                                Content="&#xE76C;"
+                                Click="OnNextClipClick"
+                                TabIndex="3"
+                                AutomationProperties.AutomationId="Transport.NextClipButton"
+                                AutomationProperties.Name="Next clip edge"
+                                ToolTipService.ToolTip="Next clip edge" />
+                    </StackPanel>
+
+                    <!-- ◀ / ▶ step ∓1 frame — MDL2 E96F/E970 (the SOLID carets).
+                         ⚠ MEASURED, not assumed (artifact §2.2): the whole candidate set
+                         was rendered from the installed Segoe MDL2 Assets first, because
+                         the handoff's own `◀`/`▶` (U+25C0/U+25B6) are emoji-capable and
+                         risk a COLOUR-emoji fallback, while U+25C4/U+25BA — tried here
+                         first — are absent from Calibri and came back from a fallback
+                         face as an arrow-with-bar shape that reads as nothing. The three
+                         pairs in this bar are deliberately three DIFFERENT MDL2 shapes so
+                         they are distinguishable at 12px: solid caret = step one frame,
+                         thin chevron = clip edge, bar-and-triangle = project start/end. -->
+                    <Button x:Name="StepBackButton"
+                            Style="{StaticResource TransportGlyphButtonStyle}"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            FontSize="12"
+                            Content="&#xE96F;"
+                            Click="OnStepBackClick"
+                            TabIndex="4"
+                            AutomationProperties.AutomationId="Transport.StepBackButton"
+                            AutomationProperties.Name="Step back one frame"
+                            ToolTipService.ToolTip="Step back one frame" />
+
+                    <Button x:Name="StopButton"
+                            Style="{StaticResource TransportGlyphButtonStyle}"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            FontSize="12"
+                            Content="&#xE71A;"
+                            Click="OnStopClick"
+                            TabIndex="5"
+                            AutomationProperties.AutomationId="Transport.StopButton"
+                            AutomationProperties.Name="Stop"
+                            ToolTipService.ToolTip="Stop (pause and return to start)" />
+
+                    <Button x:Name="PlayButton"
+                            Style="{StaticResource TransportPlayButtonStyle}"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            Content="&#xE768;"
+                            Click="OnPlayClick"
+                            TabIndex="6"
+                            AutomationProperties.AutomationId="Transport.PlayButton"
+                            AutomationProperties.Name="Play"
+                            ToolTipService.ToolTip="Play" />
+
+                    <Button x:Name="StepForwardButton"
+                            Style="{StaticResource TransportGlyphButtonStyle}"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            FontSize="12"
+                            Content="&#xE970;"
+                            Click="OnStepForwardClick"
+                            TabIndex="7"
+                            AutomationProperties.AutomationId="Transport.StepForwardButton"
+                            AutomationProperties.Name="Step forward one frame"
+                            ToolTipService.ToolTip="Step forward one frame" />
+
+                    <!-- ↻ loop. MDL2 E8EE (RepeatAll); tints `accent` when
+                         playback.looping (UI-SPEC §5). -->
+                    <Button x:Name="LoopButton"
+                            Style="{StaticResource TransportGlyphButtonStyle}"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            Content="&#xE8EE;"
+                            Click="OnLoopClick"
+                            TabIndex="8"
+                            AutomationProperties.AutomationId="Transport.LoopButton"
+                            AutomationProperties.Name="Loop"
+                            ToolTipService.ToolTip="Loop playback" />
+                </StackPanel>
+
+                <!-- RIGHT: the readout + utilities. Mock gap 11 (html:85). -->
+                <StackPanel Orientation="Horizontal"
+                            Spacing="11"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center">
+
+                    <!-- Transport.Timecode (UI-SPEC §6). The handoff puts the time
+                         readout at Preview's bottom-RIGHT (README:110), immediately
+                         above this spot, and Preview is a Phase 51 surface — so the
+                         readout lives here, in the region that owns the playhead.
+
+                         Typography (handoff:217): 12.5px / weight 700 / tabular
+                         figures. XAML has no `font-variant-numeric`; the mechanism used
+                         here is `Typography.NumeralAlignment="Tabular"`
+                         (Microsoft.UI.Xaml.Documents.Typography), and it is VERIFIED BY
+                         MEASUREMENT at region load — see TypographyNote in the
+                         code-behind and artifacts/50-06-transport.md. Width MUST NOT
+                         change as digits change or the readout jitters every frame.
+
+                         No Width/MinWidth is set on purpose: the element must be
+                         AUTO-SIZED or the width measurement would be vacuous. -->
+                    <TextBlock x:Name="Timecode"
+                               Text="00:00:00.000"
+                               Foreground="{StaticResource text-primary}"
+                               FontSize="12.5"
+                               FontWeight="Bold"
+                               Typography.NumeralAlignment="Tabular"
+                               VerticalAlignment="Center"
+                               AutomationProperties.AutomationId="Transport.Timecode"
+                               AutomationProperties.Name="Current time"
+                               AutomationProperties.AccessibilityView="Content" />
+
+                    <StackPanel x:Name="RightUtilities" Orientation="Horizontal" Spacing="11" VerticalAlignment="Center">
+                        <!-- ◳ fit/crop: a PREVIEW concern, so Phase 51's. Rendered
+                             DISABLED rather than absent (UI-SPEC §3/§9 item 6) — the
+                             handoff's `Transport.FullscreenButton` atom stays visible
+                             and honestly inert. MDL2 E740 (FullScreen) is the same
+                             4-corner expand metaphor as the mock's inline SVG. -->
+                        <Button x:Name="FullscreenButton"
+                                Style="{StaticResource TransportGlyphButtonStyle}"
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                Content="&#xE740;"
+                                IsEnabled="False"
+                                TabIndex="9"
+                                AutomationProperties.AutomationId="Transport.FullscreenButton"
+                                AutomationProperties.Name="Fit"
+                                ToolTipService.ToolTip="Fit / crop — Preview region, Phase 51" />
+
+                        <!-- ⏮ ⏭ project start / end. UI-SPEC §3 places this pair in the
+                             UTILITIES cluster, which is also where the mock draws it
+                             (`◳ ⏮ ⏭`, html:85). The mock ALSO draws a ⏮/⏭ pair inside the
+                             centre group; that duplicate is resolved here to ONE pair
+                             rather than two controls issuing the same command, because a
+                             duplicate control is a claim about capability that is not
+                             true. Recorded in artifacts/50-06-transport.md.
+                             MDL2 E892/E893 (Previous/Next) in SymbolThemeFontFamily:
+                             50-05 MEASURED that this family resolves to an
+                             icon-carrying face on Windows 10 19045 (which ships NO Segoe
+                             Fluent Icons), while the handoff's own ⏮ U+23EE is
+                             emoji-capable and would risk a colour-emoji fallback.
+                             README:272 explicitly sanctions swapping the mock's glyphs
+                             for the codebase's icon set. -->
+                        <Button x:Name="ProjectStartButton"
+                                Style="{StaticResource TransportGlyphButtonStyle}"
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                FontSize="12"
+                                Content="&#xE892;"
+                                Click="OnProjectStartClick"
+                                TabIndex="10"
+                                AutomationProperties.AutomationId="Transport.ProjectStartButton"
+                                AutomationProperties.Name="Go to start"
+                                ToolTipService.ToolTip="Go to project start" />
+
+                        <Button x:Name="ProjectEndButton"
+                                Style="{StaticResource TransportGlyphButtonStyle}"
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                FontSize="12"
+                                Content="&#xE893;"
+                                Click="OnProjectEndClick"
+                                TabIndex="11"
+                                AutomationProperties.AutomationId="Transport.ProjectEndButton"
+                                AutomationProperties.Name="Go to end"
+                                ToolTipService.ToolTip="Go to project end" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

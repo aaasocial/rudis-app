@@ -1,0 +1,629 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Rudis.Shell.Regions.Timeline"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    FontFamily="Calibri">
+
+    <!--
+      Timeline — the region name is the handoff's, character-for-character
+      (design_handoff_rudis_editor/README.md:35,129; CLAUDE.md rule 7).
+
+      EVERY colour is a {StaticResource} token key from Theme/Tokens.xaml. A raw-hex
+      literal in this file is a build FAILURE
+      (MechanicalGatesTests.no_raw_hex_outside_the_token_dictionary).
+
+      ═══ THE ONE THING THIS FILE IS ABOUT ═══
+
+      SHELL-05: "the Timeline is a custom-drawn, viewport-culled, virtualized surface
+      — NOT one control per clip". That claim is made TRUE by what is ABSENT below.
+      There is no repeater, no list control, no items host, no bound item template and
+      no per-clip element of any kind in this file, and there never may be: a clip is a
+      rectangle in an array from TimelineFrameBuilder all the way to the GPU. The
+      whole lane/clip/ruler/playhead surface is ONE SwapChainPanel driven by
+      rudis_timeline.dll (crates/timeline-render).
+
+      ⚠ The acceptance check for that paragraph is a literal grep over THIS FILE for
+      the five framework type names it would otherwise have used, pinned at zero. So
+      the names are deliberately not written here, not even to say they are absent: a
+      use-detector that its own rationale can trip stops distinguishing "used" from
+      "mentioned", and the cheap fix would be deleting the rationale rather than
+      fixing the gate. Plans 52-02, 52-04 and 52-05 each recorded this trap; this is
+      the same rule applied before it bit.
+
+      ═══ WHY THE PANEL SPANS BOTH ROWS ═══
+
+      The panel is Grid.Row="0" Grid.RowSpan="2" and the `Timeline › Toolbar` is
+      declared AFTER it, so the toolbar composites ON TOP of the swapchain — the same
+      ordinary-XAML-over-a-Rust-swapchain layering plan 51-04 proved for Preview.
+
+      That is not decoration, it is a coordinate-system decision. The renderer's frame
+      contract carries `header_h_px` = "how much vertical space at the top of the
+      surface is not the renderer's", and 52-03's TimelineViewport measures SURFACE y
+      from the top of the whole region (LaneAreaYFromSurfaceY subtracts header + ruler
+      in one step). Making the panel start BELOW the toolbar instead would have given
+      the model and the surface two different vertical origins, and every pointer
+      coordinate in plan 52-07 would have to remember which one it was in. One origin,
+      one conversion.
+
+      ═══ WHAT IS DELIBERATELY NOT HERE ═══
+
+      · The `T` (text/captions) lane the handoff draws — `crates/core::TrackKind` is
+        Video | Audio only and that crate is frozen, so it has nothing to port (D-06).
+      · Any MediaBin drop target — that interaction's SOURCE region is Phase 53's
+        (D-09), and a fake drop affordance would be exactly the placeholder CLAUDE.md
+        rule 1 forbids. The empty state is a LABEL, not a target.
+      · Rubber-band / multi-select — single primary selection this phase (D-08).
+
+      ═══ GLYPHS: THE RECORDED TRAP ═══
+
+      Windows 10 does NOT ship the newer Segoe symbol font WinUI templates reach for by
+      default, and a private-use-area codepoint has no font fallback — so pinning that
+      family renders NOTHING AT ALL: an invisible control rather than a tofu box (plan
+      50-05's measured finding; `C:\Windows\Fonts` on this 19045 box holds segmdl2.ttf
+      and holomdl2.ttf and nothing newer). The opposite trap also exists: a plain BMP
+      pictograph may fall back to a colour emoji font. Both are avoided the way
+      50-05/50-06 settled it — {ThemeResource SymbolThemeFontFamily} with Segoe MDL2
+      Assets codepoints — and each glyph below is VERIFIED BY LAUNCH and recorded, per
+      codepoint, in artifacts/52-06-region.md. (The absent family's exact name is not
+      written in this file: its acceptance check is a use-detector pinned at zero.)
+    -->
+
+    <UserControl.Resources>
+
+        <!-- ═══ `Timeline › Toolbar` tool tile — "equal 28x26 tiles, vertically
+             centered on one line" (README:132) ═══
+
+             An explicit, token-only ControlTemplate per the 50-05 region pattern, so
+             nothing inherits a WinUI system brush (which would be raw hex by proxy and
+             would make the rule-7 gate meaningless). Disabled renders `text-tertiary`
+             — the handoff's own disabled treatment. -->
+        <Style x:Key="TimelineToolTileStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-control}" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontFamily" Value="{ThemeResource SymbolThemeFontFamily}" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{TemplateBinding CornerRadius}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-elevated}" />
+                                            <Setter Target="Glyph.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Glyph.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Glyph"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontFamily="{TemplateBinding FontFamily}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ The add-track menu, token-only (plan 52-14) ═══
+
+             The ZoomOverflowButton's flyout note applies verbatim here: an unstyled
+             presenter inherits WinUI system brushes, which is raw hex by proxy and would
+             make the rule-7 gate meaningless. So the presenter is styled from tokens and
+             the ITEMS carry an explicit ControlTemplate for the same reason the tool
+             tiles do — the pointer-over and pressed states are where a stock template
+             reaches for a system brush, and a Setter alone cannot reach them. -->
+        <Style x:Key="TimelineMenuPresenterStyle" TargetType="MenuFlyoutPresenter">
+            <Setter Property="Background" Value="{StaticResource bg-elevated}" />
+            <Setter Property="BorderBrush" Value="{StaticResource border-subtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-panel}" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+
+        <Style x:Key="TimelineMenuItemStyle" TargetType="MenuFlyoutItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-primary}" />
+            <Setter Property="FontFamily" Value="Calibri" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="10,6,10,6" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuFlyoutItem">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{StaticResource radius-control}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <TextBlock x:Name="Label"
+                                       Text="{TemplateBinding Text}"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       FontFamily="{TemplateBinding FontFamily}"
+                                       FontSize="{TemplateBinding FontSize}"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <!-- The region root. Background is `bg-app` — the handoff's body base and the
+         renderer's own clear colour, so the two agree at the seam while the surface
+         is still being created. MinHeight and the toolbar band's height are applied
+         in the code-behind FROM TimelineMetrics, so the handoff's numbers live in
+         exactly one place (see the remarks on Timeline.ApplyHandoffMetrics). -->
+    <Grid x:Name="TimelineRoot"
+          Background="{StaticResource bg-app}"
+          KeyboardAcceleratorPlacementMode="Hidden">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- ═══ KEYBOARD (README:140) ═══
+             S = split the selected clip at the playhead · Delete / Back = remove it ·
+             Escape = abandon a drag and clear the selection.
+
+             DECLARED ON THE REGION ROOT, not on the tool tiles. Plan 50-05 paid for
+             this once: an accelerator hosted on a Collapsed element never fires, and
+             the tiles beside it collapse into an overflow at narrow widths — so
+             button-hosted accelerators would silently stop working exactly when the
+             window is small, which is the hardest kind of bug to notice.
+
+             ScopeOwner is set in the code-behind to this same root, so these are
+             SCOPED rather than window-wide. That matters because these are BARE keys:
+             an unscoped `S` would fire while the user was typing into `Chat` (Phase
+             54) or renaming in `MediaBin` (Phase 53). Scoping them to the region makes
+             the Timeline's own tab stop meaningful — which is the unfinished focus
+             story plan 52-06 handed forward.
+
+             AND THAT IS WHY THE ROOT CARRIES KeyboardAcceleratorPlacementMode="Hidden"
+             (quick 260731-k1a) — the two notes belong together, because the
+             root-hosting decision above is precisely what caused the defect. The
+             property defaults to `Auto`, under which WinUI renders a hover tooltip
+             on the element that HOSTS the accelerator. The host here is the region
+             ROOT, so resting the pointer anywhere over the Timeline floated a
+             tooltip; only `S` ever showed, because it is first in the collection
+             below.
+
+             `Hidden` changes PRESENTATION ONLY. It is not IsEnabled="False" and it
+             does not remove anything — all four accelerators still fire. The two are
+             easy to confuse, so say it plainly for whoever reads this next: the fix
+             for a stray accelerator tooltip is NEVER to delete or disable an
+             accelerator. Deleting `S` here would have silently taken split with it. -->
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="S" Invoked="OnSplitAccelerator" />
+            <KeyboardAccelerator Key="Delete" Invoked="OnDeleteAccelerator" />
+            <KeyboardAccelerator Key="Back" Invoked="OnDeleteAccelerator" />
+            <KeyboardAccelerator Key="Escape" Invoked="OnEscapeAccelerator" />
+        </Grid.KeyboardAccelerators>
+
+        <!-- ═══ THE SURFACE ═══
+             One SwapChainPanel. Nothing per clip, now or ever — that absence IS
+             SHELL-05's first criterion, and it is checked by a grep rather than by
+             review. Spans both rows; see the header note. -->
+        <!-- AllowDrop is on THIS element and not inherited from `WindowRoot` (plan
+             53.1-02): a drag-drop routed event only reaches an element that carries
+             its own flag, so an ancestor's `AllowDrop` lets that ANCESTOR receive the
+             bubbled event and confers nothing downward. Without this line the surface's
+             DragOver/Drop handlers never fire at all — not "fire and reject". -->
+        <SwapChainPanel x:Name="TimelineSurface"
+                        Grid.Row="0"
+                        Grid.RowSpan="2"
+                        IsTabStop="True"
+                        AllowDrop="True"
+                        FocusVisualPrimaryBrush="{StaticResource accent-bright}"
+                        FocusVisualSecondaryBrush="{StaticResource on-accent}"
+                        AutomationProperties.AutomationId="Timeline.Root"
+                        AutomationProperties.Name="Timeline surface"
+                        AutomationProperties.AccessibilityView="Content" />
+
+        <!-- ═══ The drop-preview ghost clip (phase 53.1, owner request mid-UAT) ═══
+             A translucent clip-sized rectangle showing WHERE and HOW LONG the dragged
+             media would land while the drag hovers a lane — the standard NLE
+             drop-preview affordance. XAML overlay rather than a renderer pass because
+             it exists only during a live OS drag (a handful of frames, not the hot
+             path), and `IsHitTestVisible=False` because a ghost that could steal
+             DragOver from the surface beneath it would kill the very drop it
+             previews. Positioned from code-behind via the SAME viewport conversions
+             the drop itself resolves through — one geometry, two consumers. -->
+        <Border x:Name="DropGhost"
+                Grid.Row="0"
+                Grid.RowSpan="2"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="{StaticResource accent}"
+                BorderBrush="{StaticResource accent-bright}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource radius-clip}"
+                Opacity="0.35"
+                IsHitTestVisible="False"
+                Visibility="Collapsed" />
+
+        <!-- ═══ `Timeline › Toolbar` (README:132) ═══
+             Sticky BY CONSTRUCTION: it is a separate grid row over a surface that
+             never scrolls it. The ruler is sticky the same way — the renderer draws it
+             at a fixed y and the vertical scroll applies only to the lane stack. -->
+        <!-- The AutomationId is here so the band's 36px is UIA-MEASURABLE rather than
+             asserted from source — the same reason plan 50-06 gave `Transport.Root`
+             one. It is a container: it invokes nothing and takes no tab stop of its
+             own. -->
+        <Border x:Name="TimelineToolbar"
+                Grid.Row="0"
+                AutomationProperties.AutomationId="Timeline.Toolbar"
+                AutomationProperties.Name="Timeline toolbar"
+                Background="{StaticResource bg-bar}"
+                BorderBrush="{StaticResource border-hairline}"
+                BorderThickness="0,0,0,1"
+                Padding="11,0,11,0"
+                TabFocusNavigation="Once">
+
+            <Grid VerticalAlignment="Center">
+
+                <!-- Left group: region tag, live timecode, the three tools. -->
+                <StackPanel x:Name="LeftGroup"
+                            Orientation="Horizontal"
+                            Spacing="{StaticResource gap-toolbar}"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center">
+
+                    <!-- Region tag: 10px / 800 / letter-spacing .08em / `text-faint`
+                         (README:217). CharacterSpacing is in 1/1000 em, so .08em is
+                         80 — the same conversion TitleBar/Toolbar already use. -->
+                    <TextBlock x:Name="RegionTag"
+                               Text="TIMELINE"
+                               Foreground="{StaticResource text-faint}"
+                               FontSize="10"
+                               FontWeight="ExtraBold"
+                               CharacterSpacing="80"
+                               VerticalAlignment="Center"
+                               AutomationProperties.AutomationId="Timeline.RegionTag"
+                               AutomationProperties.Name="Timeline region" />
+
+                    <!-- Live timecode, 12.5px / 700 / TABULAR figures (README:132,217).
+                         The mechanism is Typography.NumeralAlignment="Tabular" — plan
+                         50-06's MEASURED answer, verified there against a proportional
+                         apparatus control. It is NOT FontFeatures="tnum", which was the
+                         guess that did not work; do not re-derive it.
+
+                         FORMAT: HH:MM:SS:FF, the handoff's own Timeline form
+                         (README:132,265) — deliberately different from
+                         Transport.Timecode's hh:mm:ss.mmm. See TimelineTimecode's
+                         remarks for why two regions answer two different questions.
+
+                         No Width/MinWidth: the element must be auto-sized or a width
+                         measurement of the tabular claim would be vacuous. -->
+                    <TextBlock x:Name="Timecode"
+                               Text="00:00:00:00"
+                               Foreground="{StaticResource text-primary}"
+                               FontSize="12.5"
+                               FontWeight="Bold"
+                               Typography.NumeralAlignment="Tabular"
+                               VerticalAlignment="Center"
+                               Margin="6,0,6,0"
+                               AutomationProperties.AutomationId="Timeline.Timecode"
+                               AutomationProperties.Name="Timeline position"
+                               AutomationProperties.AccessibilityView="Content" />
+
+                    <!-- The three tools, LIVE as of plan 52-07: each dispatches an
+                         EXISTING Command shape (SplitClip / DuplicateClip / RemoveClip)
+                         through the EXISTING rudis_dispatch_command (D-12). They start
+                         disabled and the code-behind enables them from the SELECTION,
+                         so a tile is never offering an operation that has no subject —
+                         and Split additionally requires the playhead to be strictly
+                         inside the selected clip, because the domain refuses an edge
+                         split and a tile that can only fail is worse than a dim one. -->
+                    <Button x:Name="SplitButton"
+                            Style="{StaticResource TimelineToolTileStyle}"
+                            Content="&#xE8C6;"
+                            IsEnabled="False"
+                            Click="OnSplitClick"
+                            AutomationProperties.AutomationId="Timeline.SplitButton"
+                            AutomationProperties.Name="Split clip at playhead" />
+
+                    <Button x:Name="DuplicateButton"
+                            Style="{StaticResource TimelineToolTileStyle}"
+                            Content="&#xE8C8;"
+                            IsEnabled="False"
+                            Click="OnDuplicateClick"
+                            AutomationProperties.AutomationId="Timeline.DuplicateButton"
+                            AutomationProperties.Name="Duplicate clip" />
+
+                    <Button x:Name="DeleteButton"
+                            Style="{StaticResource TimelineToolTileStyle}"
+                            Content="&#xE74D;"
+                            IsEnabled="False"
+                            Click="OnDeleteClick"
+                            AutomationProperties.AutomationId="Timeline.DeleteButton"
+                            AutomationProperties.Name="Delete clip" />
+
+                    <!-- ═══ TRACK MANAGEMENT (plan 52-14) ═══
+
+                         The owner's one scope addition, and a PORT rather than an
+                         invention: v6.0 had exactly this gesture — `#tl-add-video-track`
+                         and `#tl-add-audio-track` in its timeline toolbar
+                         (frontend/src/main.ts:1478-1479), plus a per-lane `✕` in the
+                         gutter, both gated by a confirm when the track holds clips
+                         (main.ts `removeTrackAt`). CLAUDE.md convention 8 asks for prior
+                         art before an affordance is finalised; v6 is this repo's own
+                         prior art for this exact gesture, and it is what is being ported.
+
+                         WHAT IS NOT PORTED, and why: the per-lane `✕`. This region's
+                         gutter is DRAWN by the renderer and has no per-lane control by
+                         construction — that absence IS SHELL-05 — so a per-lane close
+                         box would mean new renderer hit-test scope, which is not what a
+                         gap-closure plan is for. The gesture is mapped onto the toolbar
+                         instead and acts on the SELECTED clip's track (D-08 gives
+                         exactly one primary selection to read). The cost, stated rather
+                         than hidden: an EMPTY track cannot be removed through the UI,
+                         because an empty track has no clip to select.
+
+                         Both commands already exist in the frozen `crates/core`
+                         (`Command::AddTrack` at command.rs:393, `RemoveTrack` at :396),
+                         both are undoable, and both travel the EXISTING
+                         `rudis_dispatch_command` route the five clip edits use — no new
+                         FFI export (D-12). `Ctrl+Z` is the `Toolbar` region's
+                         accelerator and stays there; no second owner is declared here.
+
+                         ONE tile with two MENU ITEMS rather than v6's two buttons, so
+                         the toolbar keeps the handoff's tile rhythm while the two
+                         ACTIONS are preserved exactly. -->
+                    <Button x:Name="AddTrackButton"
+                            Style="{StaticResource TimelineToolTileStyle}"
+                            Content="&#xE710;"
+                            AutomationProperties.AutomationId="Timeline.AddTrackButton"
+                            AutomationProperties.Name="Add track">
+                        <Button.Flyout>
+                            <MenuFlyout Placement="Bottom"
+                                        MenuFlyoutPresenterStyle="{StaticResource TimelineMenuPresenterStyle}">
+                                <MenuFlyoutItem x:Name="AddVideoTrackItem"
+                                                Style="{StaticResource TimelineMenuItemStyle}"
+                                                Text="Add video track"
+                                                Click="OnAddVideoTrackClick"
+                                                AutomationProperties.AutomationId="Timeline.AddVideoTrackItem"
+                                                AutomationProperties.Name="Add video track" />
+                                <MenuFlyoutItem x:Name="AddAudioTrackItem"
+                                                Style="{StaticResource TimelineMenuItemStyle}"
+                                                Text="Add audio track"
+                                                Click="OnAddAudioTrackClick"
+                                                AutomationProperties.AutomationId="Timeline.AddAudioTrackItem"
+                                                AutomationProperties.Name="Add audio track" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+
+                    <!-- Starts disabled and follows the SELECTION, exactly as the three
+                         tiles above it do: with nothing selected there is no track to
+                         name, and a tile that can only fail is worse than a dim one.
+                         The removal CASCADES, so a track holding clips asks first. -->
+                    <Button x:Name="RemoveTrackButton"
+                            Style="{StaticResource TimelineToolTileStyle}"
+                            Content="&#xE738;"
+                            IsEnabled="False"
+                            Click="OnRemoveTrackClick"
+                            AutomationProperties.AutomationId="Timeline.RemoveTrackButton"
+                            AutomationProperties.Name="Remove track" />
+                </StackPanel>
+
+                <!-- Right group: the zoom control `- [] +` (README:132, right-aligned).
+                     Below ~520px it collapses to a single overflow chevron
+                     (README:176), driven by a MEASURED SizeChanged handler in the
+                     code-behind and never by XAML's width-based visual-state trigger:
+                     50-05 implemented that textbook arrangement in two placements at
+                     three widths and it NEVER FIRED. (The trigger type's name is not
+                     written here — its acceptance check over this file is a
+                     use-detector pinned at zero.) -->
+                <StackPanel x:Name="ZoomGroup"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center">
+
+                    <!-- Zoom is PURE VIEW STATE: these three change px-per-second and
+                         scroll and make no backend call at all, so unlike the tool
+                         tiles they are unconditionally live. -->
+                    <Button x:Name="ZoomOutButton"
+                            Style="{StaticResource TimelineToolTileStyle}"
+                            Content="&#xE71F;"
+                            Click="OnZoomOutClick"
+                            AutomationProperties.AutomationId="Timeline.ZoomOutButton"
+                            AutomationProperties.Name="Zoom out" />
+
+                    <Button x:Name="ZoomFitButton"
+                            Style="{StaticResource TimelineToolTileStyle}"
+                            Content="&#xE9A6;"
+                            Click="OnZoomFitClick"
+                            AutomationProperties.AutomationId="Timeline.ZoomFitButton"
+                            AutomationProperties.Name="Zoom to fit" />
+
+                    <Button x:Name="ZoomInButton"
+                            Style="{StaticResource TimelineToolTileStyle}"
+                            Content="&#xE8A3;"
+                            Click="OnZoomInClick"
+                            AutomationProperties.AutomationId="Timeline.ZoomInButton"
+                            AutomationProperties.Name="Zoom in" />
+                </StackPanel>
+
+                <!-- The narrow-window replacement for the zoom group. Collapsed until
+                     the measured handler says otherwise. MDL2 E70D is the chevron the
+                     handoff draws as a bare glyph.
+
+                     It carries the SAME three controls in a flyout rather than being a
+                     dead affordance: at narrow widths this is the only route to zoom,
+                     and a chevron that opens nothing would leave the feature
+                     unreachable exactly when the layout says it should still be
+                     reachable (README:176). The presenter is styled from tokens for the
+                     50-05 reason — an unstyled one inherits WinUI system brushes, which
+                     is raw hex by proxy. -->
+                <Button x:Name="ZoomOverflowButton"
+                        Style="{StaticResource TimelineToolTileStyle}"
+                        Content="&#xE70D;"
+                        Visibility="Collapsed"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="Timeline.ZoomOverflowButton"
+                        AutomationProperties.Name="Zoom controls">
+                    <Button.Flyout>
+                        <Flyout Placement="Bottom">
+                            <Flyout.FlyoutPresenterStyle>
+                                <Style TargetType="FlyoutPresenter">
+                                    <Setter Property="Background" Value="{StaticResource bg-elevated}" />
+                                    <Setter Property="BorderBrush" Value="{StaticResource border-subtle}" />
+                                    <Setter Property="BorderThickness" Value="1" />
+                                    <Setter Property="CornerRadius" Value="{StaticResource radius-panel}" />
+                                    <Setter Property="Padding" Value="6" />
+                                    <Setter Property="MinWidth" Value="0" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                </Style>
+                            </Flyout.FlyoutPresenterStyle>
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <Button x:Name="ZoomOutOverflowButton"
+                                        Style="{StaticResource TimelineToolTileStyle}"
+                                        Content="&#xE71F;"
+                                        Click="OnZoomOutClick"
+                                        AutomationProperties.AutomationId="Timeline.ZoomOutOverflowButton"
+                                        AutomationProperties.Name="Zoom out" />
+                                <Button x:Name="ZoomFitOverflowButton"
+                                        Style="{StaticResource TimelineToolTileStyle}"
+                                        Content="&#xE9A6;"
+                                        Click="OnZoomFitClick"
+                                        AutomationProperties.AutomationId="Timeline.ZoomFitOverflowButton"
+                                        AutomationProperties.Name="Zoom to fit" />
+                                <Button x:Name="ZoomInOverflowButton"
+                                        Style="{StaticResource TimelineToolTileStyle}"
+                                        Content="&#xE8A3;"
+                                        Click="OnZoomInClick"
+                                        AutomationProperties.AutomationId="Timeline.ZoomInOverflowButton"
+                                        AutomationProperties.Name="Zoom in" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- ═══ The live duration readout (README:140) ═══
+             The dragging/trimming tooltip. It follows the GHOST, not the pointer, so it
+             reads as a property of the clip being edited rather than as a cursor
+             decoration — and it is positioned in LOGICAL px from the same GhostRect the
+             renderer draws, so the two cannot disagree.
+
+             IsHitTestVisible="False" is load-bearing, not tidiness: this sits over the
+             SwapChainPanel in row 1, and without it the readout would swallow the very
+             pointer moves that are updating it — the drag would stop dead the moment the
+             label appeared under the cursor.
+
+             Positioned by Margin against a Left/Top alignment rather than by a Canvas:
+             one attached-property write per moved frame, and no panel whose children
+             could ever be mistaken for the per-clip elements SHELL-05 forbids. -->
+        <Border x:Name="DragReadout"
+                Grid.Row="1"
+                Visibility="Collapsed"
+                IsHitTestVisible="False"
+                Background="{StaticResource bg-elevated}"
+                BorderBrush="{StaticResource border-subtle}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource radius-control}"
+                Padding="6,2,6,2"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                AutomationProperties.AutomationId="Timeline.DragReadout"
+                AutomationProperties.Name="Edit duration">
+            <TextBlock x:Name="DragReadoutText"
+                       Foreground="{StaticResource text-primary}"
+                       FontSize="11"
+                       FontWeight="SemiBold"
+                       Typography.NumeralAlignment="Tabular"
+                       AutomationProperties.AutomationId="Timeline.DragReadoutText" />
+        </Border>
+
+        <!-- ═══ Empty state (README:139) ═══
+             The handoff's own string, as a LABEL over the surface. It is explicitly
+             NOT a drop target: dragging from the MediaBin is Phase 53's interaction
+             because Phase 53 owns the source region (D-09), and an affordance that
+             looks droppable and is not would be worse than no affordance at all.
+             The renderer still draws the lanes and the ruler underneath it. -->
+        <TextBlock x:Name="EmptyState"
+                   Grid.Row="1"
+                   Text="Drag clips from the Media Bin to start"
+                   Foreground="{StaticResource text-tertiary}"
+                   FontSize="13"
+                   FontWeight="SemiBold"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   AutomationProperties.AutomationId="Timeline.EmptyState"
+                   AutomationProperties.Name="Timeline empty state" />
+
+        <!-- A renderer fault must be VISIBLE and NAMED, never swallowed (the 50-06
+             rule: a domain problem and a transport fault stay on two distinguishable
+             paths). Carries the renderer's own status name. No red/danger token exists
+             anywhere in the handoff, so this uses `text-tertiary` on `bg-elevated`
+             rather than inventing a colour. -->
+        <Border x:Name="StatusMessage"
+                Grid.Row="1"
+                Visibility="Collapsed"
+                Background="{StaticResource bg-elevated}"
+                CornerRadius="{StaticResource radius-panel}"
+                Padding="11"
+                MaxWidth="460"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+            <TextBlock x:Name="StatusMessageText"
+                       Foreground="{StaticResource text-tertiary}"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="Timeline.StatusMessage"
+                       AutomationProperties.Name="Timeline status" />
+        </Border>
+    </Grid>
+</UserControl>

@@ -1,0 +1,149 @@
+<Project>
+  <!-- Rudis.Ffi.targets — THIS FILE SHIPS (Phase 47, plan 47-08; FFI-05 / D-14).
+       The .targets is the deliverable; the throwaway harness under
+       spikes/47-ffi-harness/ is only its proof. Phase 50's production .csproj
+       imports THIS file, unchanged — that is D-14's whole point: Phase 50
+       imports a PROVEN file instead of writing one blind.
+
+       Freshness design (RESEARCH C2, settled): ALWAYS invoke cargo and trust
+       Cargo's own incrementality. An MSBuild Inputs/Outputs glob reproducing
+       Cargo's cross-crate dependency graph is a drift risk that CANNOT be
+       right (a change three crates upstream is invisible to a file glob);
+       `cargo build` with nothing changed returns in well under a second and
+       is the authoritative source of truth for "does this need rebuilding".
+
+       Three overridable properties so Phase 50's import needs zero edits:
+       RustFfiWorkspaceRoot / RustFfiTargetDir / RustFfiResourcesDir. -->
+  <PropertyGroup>
+    <RustFfiWorkspaceRoot Condition="'$(RustFfiWorkspaceRoot)' == ''">$(MSBuildThisFileDirectory)..\..</RustFfiWorkspaceRoot>
+    <!-- CARGO_TARGET_DIR IS PART OF THE DEFAULT, not an override (Phase 55, plan
+         55-09). BuildRustFfi below shells out to `cargo build`, and cargo honors
+         CARGO_TARGET_DIR — so whenever that variable is set (a worktree sharing the
+         primary checkout's target dir; a CI cache; any redirected build), cargo wrote
+         the cdylib somewhere this file then did not look, and the very next line
+         failed with:
+
+           error MSB3030: Could not copy the file "...\crates\ffi\..\..\target\
+           release\rudis_ffi.dll" because it was not found.
+
+         Measured cost of the old default: the EvalHarness self-check
+         (`dotnet run` on shell/Rudis.Shell.EvalHarness) could not run in any
+         worktree (plan 55-02), and plans 55-04 through 55-08 each had to pass
+         -p:RustFfiTargetDir by hand. Those workarounds worked because the override
+         seam below was already here — the seam was never the problem, the default
+         ignoring the tool's own output location was. An explicitly-passed
+         RustFfiTargetDir still wins over both branches.
+
+         (Command-line flag names appear throughout this file without their leading
+         double hyphen: an XML comment may not contain one.) -->
+    <RustFfiTargetDir Condition="'$(RustFfiTargetDir)' == '' And '$(CARGO_TARGET_DIR)' != ''">$(CARGO_TARGET_DIR)\release</RustFfiTargetDir>
+    <RustFfiTargetDir Condition="'$(RustFfiTargetDir)' == ''">$(RustFfiWorkspaceRoot)\target\release</RustFfiTargetDir>
+    <RustFfiResourcesDir Condition="'$(RustFfiResourcesDir)' == ''">$(RustFfiTargetDir)\..\resources</RustFfiResourcesDir>
+    <!-- The SHIPPED sidecar payload (Phase 55, plan 55-01 relocated it here from
+         src-tauri\binaries): the LGPL FFmpeg CLI 63/61 line, whisper-cli + ggml-small,
+         the OpenCV tracking sidecar and SDL2. Staged on PUBLISH only — see
+         StageRustFfiPublish. An importer that does not ship the sidecars sets
+         StageRudisRuntimeBinariesOnPublish=false. -->
+    <RudisRuntimeBinariesDir Condition="'$(RudisRuntimeBinariesDir)' == ''">$(RustFfiWorkspaceRoot)\runtime\binaries</RudisRuntimeBinariesDir>
+    <StageRudisRuntimeBinariesOnPublish Condition="'$(StageRudisRuntimeBinariesOnPublish)' == ''">true</StageRudisRuntimeBinariesOnPublish>
+  </PropertyGroup>
+  <Target Name="BuildRustFfi" BeforeTargets="Build">
+    <Exec Command="cargo build -p ffi --release" WorkingDirectory="$(RustFfiWorkspaceRoot)" />
+  </Target>
+  <Target Name="StageRustFfi" AfterTargets="BuildRustFfi">
+    <Copy SourceFiles="$(RustFfiTargetDir)\rudis_ffi.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <!-- D-14's native-staging clause: transitive natives (bundled LGPL FFmpeg,
+         whisper.cpp, the OpenCV tracking sidecar) stage from RustFfiResourcesDir,
+         mirroring scripts/windows/fetch-lgpl-ffmpeg.ps1's staging convention
+         (v7-ARCHITECTURE:204). The directory is unpopulated until Phase 50 wires
+         the sidecars — the glob is a harmless no-op while empty (SkipUnchangedFiles
+         + empty item list). The Phase 47 harness never calls FFmpeg-needing
+         exports, so this step runs empty this phase. Phase 50: populate the
+         directory (and widen the glob past *.dll — the FFmpeg sidecar also
+         carries ffmpeg.exe/ffprobe.exe, per fetch-lgpl-ffmpeg.ps1).
+
+         The ItemGroup lives INSIDE the target deliberately: a project-level
+         ItemGroup evaluates at parse time, before BuildRustFfi has run, against
+         a directory that may not exist yet — in-target, the glob is evaluated
+         at build time, after the cargo build. -->
+    <ItemGroup>
+      <RudisNativeResource Include="$(RustFfiResourcesDir)\**\*.dll" />
+      <RudisNativeResource Include="$(RustFfiResourcesDir)\**\*.exe" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RudisNativeResource)" DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" Condition="'@(RudisNativeResource)' != ''" />
+  </Target>
+
+  <!-- ================================================================== -->
+  <!-- PUBLISH staging (Phase 55, plan 55-09) — closes 50-09-PACKAGING.md §3.  -->
+  <!-- ================================================================== -->
+  <!-- StageRustFfi above targets $(OutDir). `dotnet publish` computes its OWN file
+       set (@(ResolvedFileToPublish)) from registered Content/None/reference items, so
+       a raw <Copy> into $(OutDir) is INVISIBLE to it. 50-09 measured the consequence
+       rather than inferring it: the raw publish output of this project exits
+       -1073741189 within a second and never creates a window (§3.3), because
+       rudis_ffi.dll and the FFmpeg runtime it load-time-imports are simply absent
+       (§3.1). 50-09 §3.6 named this fix as one of its two candidate mechanisms; this
+       is that mechanism, applied.
+
+       StageRustFfi is deliberately UNTOUCHED: dev builds stage byte-identically to
+       before, and this target is purely additive. -->
+  <Target Name="StageRustFfiPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <PropertyGroup>
+      <_RudisPublishDir Condition="!HasTrailingSlash('$(PublishDir)')">$(PublishDir)\</_RudisPublishDir>
+      <_RudisPublishDir Condition="HasTrailingSlash('$(PublishDir)')">$(PublishDir)</_RudisPublishDir>
+    </PropertyGroup>
+
+    <Copy SourceFiles="$(RustFfiTargetDir)\rudis_ffi.dll" DestinationFolder="$(_RudisPublishDir)" SkipUnchangedFiles="true" />
+
+    <!-- ⚠ *.dll ONLY — this glob is deliberately NARROWER than StageRustFfi's, and the
+         difference is load-bearing rather than an oversight.
+
+         RustFfiResourcesDir is the ffmpeg-DEV payload (crates/engine/ffmpeg-dev/bin,
+         the 62/60 line whose import libraries rudis_ffi.dll links against). Its DLLs
+         must ship: rudis_ffi.dll carries LOAD-TIME PE imports of them and cannot load
+         beside the exe without them (50-02-unknowns.md §3.3).
+
+         Its ffmpeg.exe / ffprobe.exe / ffplay.exe must NOT. engine::resolve_binary()
+         (crates/engine/src/ffmpeg.rs:144-151) checks the exe's OWN directory BEFORE
+         its binaries\ subdirectory, so a dev ffmpeg.exe sitting flat in $(PublishDir)
+         would SHADOW the shipped LGPL sidecar staged into binaries\ below — the app
+         would then run an FFmpeg build that no gate in this phase measured (a
+         different generation: libavutil 60 vs the shipped 61, and `enable-whisper`
+         vs the shipped `disable-whisper`). Plan 55-01 hardened audio_retime.rs
+         against exactly this silent-narrowing class, where a candidate list falls
+         through to a dev binary and keeps reporting green about something that never
+         ships. Both builds are LGPL (`enable-version3`, no `enable-gpl`, x264/x265
+         disabled), so this is a PROVENANCE defect, not a GPL leak — stated precisely
+         so a later reader does not repair the wrong thing. 50-09 §3.5 reached the
+         same conclusion by hand and deliberately left the three .exe files
+         unstaged. -->
+    <ItemGroup>
+      <RudisNativeResourcePublish Include="$(RustFfiResourcesDir)\**\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RudisNativeResourcePublish)" DestinationFolder="$(_RudisPublishDir)"
+          SkipUnchangedFiles="true" Condition="'@(RudisNativeResourcePublish)' != ''" />
+
+    <!-- The SHIPPED sidecar payload into $(PublishDir)\binaries\, preserving the tree
+         (opencv\ has its own subdirectory). That exact layout is what
+         engine::resolve_binary() case 2's second candidate looks for, so this is the
+         shipped resolution path, not a convention invented here. The whole payload
+         travels — the FFmpeg CLI, whisper-cli.exe + ggml-small.bin, the OpenCV
+         tracking sidecar, SDL2 — because every one of them is reachable from a
+         shipped feature (import/export, transcription, tracking), and an installer
+         measurement that quietly omitted 487 MB of model would not be the installer's
+         size. 50-09 §1.4 flagged precisely this and said Phase 55 must re-measure
+         "once the shipping installer carries the full payload".
+
+         In-target ItemGroup for the same reason StageRustFfi's is (see :37-40): a
+         project-level glob evaluates at parse time. -->
+    <ItemGroup Condition="'$(StageRudisRuntimeBinariesOnPublish)' == 'true' And Exists('$(RudisRuntimeBinariesDir)')">
+      <RudisRuntimeBinary Include="$(RudisRuntimeBinariesDir)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RudisRuntimeBinary)"
+          DestinationFiles="@(RudisRuntimeBinary->'$(_RudisPublishDir)binaries\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" Condition="'@(RudisRuntimeBinary)' != ''" />
+
+    <Message Importance="high" Text="StageRustFfiPublish -> $(_RudisPublishDir) (rudis_ffi.dll + @(RudisNativeResourcePublish->Count()) native dll(s) + @(RudisRuntimeBinary->Count()) sidecar file(s) under binaries\)" />
+  </Target>
+</Project>

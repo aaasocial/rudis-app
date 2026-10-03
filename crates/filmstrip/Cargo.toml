@@ -1,0 +1,26 @@
+[package]
+name = "filmstrip"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis per-media-file thumbnail strip extraction (chunked sequential decode, aspect-preserving downsample, packed RGBA sheet) plus a fail-closed disk cache carrying a progressive-fill header. Phase 53.2's producer half."
+publish = false
+license.workspace = true
+
+[dependencies]
+# The FROZEN media engine (annotated tag `engine-axis-freeze`), CALLED and never
+# modified. EXACTLY two items are used -- `decode_frames_rgba_seq` and the
+# `Frame` struct it returns -- both already `pub use`d at that crate's root, so
+# this dependency edge requires no change whatsoever to its manifest or its
+# sources. Mirrors `crates/waveform`'s relationship to `render_audio_pcm`.
+engine = { path = "../engine" }
+# Thumbnail downsampling only (`image::imageops::resize`). Already resolved in
+# this workspace's Cargo.lock at 0.25.10 via `agent-llm` and `engine`; this is a
+# new DIRECT edge on an already-vetted dependency (PROVENANCE Entry 31).
+# The `png` feature is carried for debug dumps only -- the strip cache payload is
+# RAW RGBA, deliberately (see `cache.rs`'s codec argument).
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde = { version = "1", features = ["derive"] }
+# The cache file embeds its FULL key as JSON, so a filename-hash collision
+# degrades to a MISS instead of to a WRONG strip.
+serde_json = "1"
+thiserror = "2"

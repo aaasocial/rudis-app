@@ -1,0 +1,18 @@
+[
+  {
+    "id": "lower-third",
+    "name": "Lower Third",
+    "category": "title",
+    "file": "lower-third.png",
+    "width": 400,
+    "height": 80
+  },
+  {
+    "id": "sticker-badge",
+    "name": "Sticker Badge",
+    "category": "sticker",
+    "file": "sticker-badge.png",
+    "width": 128,
+    "height": 128
+  }
+]

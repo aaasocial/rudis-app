@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Rudis.Shell.Regions.PreviewInkLayer"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+      The Canvas region's INK LAYER: an ordinary transparent XAML sibling drawn one
+      layer above the Preview region's SwapChainPanel, in the SAME visual tree
+      (D-11). It is the whole replacement for src-tauri/src/canvas_input.rs's Win32
+      WndProc subclass, which is RETIRED rather than ported — that subclass exists
+      only because a Win32 child HWND at HWND_TOP swallowed input the WebView never
+      saw, and under a SwapChainPanel that problem does not exist.
+
+      ═══ Background="Transparent" IS LOAD-BEARING ═══
+
+      A null Brush is NOT hit-testable in WinUI: pointer events would fall straight
+      through and this region would be silently inert — present in the tree, findable
+      by UIA, and incapable of ever receiving a stroke. `Transparent` is a real brush
+      that paints nothing and hit-tests everything. Do not "clean this up".
+
+      ═══ WHY THE TRAIL IS DASHED `accent` ═══
+
+      StrokeDashArray + `accent` are not styling choices: they must be pixel-alike
+      with what the ENGINE draws for the same stroke once it commits
+      (engine::draw_stroke_dashed, with crates/ffi/src/panel/overlay.rs's OVERLAY_INK
+      constant — which carries the `accent` token's value on the Rust half; the two
+      are kept equal there, and this file states the token name rather than repeating
+      the literal, because a hex literal anywhere outside Theme/Tokens.xaml is a build
+      FAILURE, comments included). At the hand-off instant both layers briefly draw
+      the same geometry in the same place, and that is only invisible if they look
+      identical. See PreviewInkLayer.xaml.cs's commit-sequence remarks.
+
+      ═══ HIT-TESTABILITY IS THE TOOL GATE ═══
+
+      InkRoot.IsHitTestVisible is `SelectedTool != Pointer`. With Pointer selected the
+      whole layer is inert and every pointer event reaches whatever is beneath it —
+      exactly how v6.0's DRAW_MODE flag behaved. LiveTrail is permanently
+      IsHitTestVisible="False" so the drawn ink can never eat the pointer that is
+      drawing it.
+
+      Every colour is a {StaticResource} token key (CLAUDE.md rule 7 / D-19); a raw
+      hex literal here is a build FAILURE (MechanicalGatesTests.
+      no_raw_hex_outside_the_token_dictionary).
+    -->
+
+    <Grid x:Name="InkRoot"
+          Background="Transparent"
+          AutomationProperties.AutomationId="Canvas.PreviewInk"
+          AutomationProperties.Name="Canvas ink layer">
+
+        <!-- ⚠ A `Path` whose `Data` is REPLACED per update, NOT a `Polyline` whose
+             `Points` collection is edited. This is not a style preference — it is
+             plan 51-05's own hand-off observation, which caught a live trail that
+             rendered NOTHING while every assertion in the C# tier was green:
+
+               · a `Points` value set here in XAML rendered perfectly;
+               · clearing that collection from code DID re-render (the shape vanished);
+               · adding points to it afterwards drew nothing at all.
+
+             Assigning a fresh `Geometry` to `Path.Data` is a plain DependencyProperty
+             set with a new value, which invalidates unambiguously — the same
+             mechanism `Canvas.xaml.cs`'s dot grid uses. See RenderTrail. -->
+        <Path x:Name="LiveTrail"
+              Stretch="None"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch"
+              Stroke="{StaticResource accent}"
+              StrokeThickness="2"
+              StrokeDashArray="4,3"
+              StrokeLineJoin="Round"
+              IsHitTestVisible="False" />
+    </Grid>
+</UserControl>

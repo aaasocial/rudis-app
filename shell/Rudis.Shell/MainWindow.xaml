@@ -1,0 +1,458 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Rudis.Shell.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:regions="using:Rudis.Shell.Regions">
+
+    <!-- Region stack (CLAUDE.md rule 7 — the names are the handoff's, verbatim):
+         TitleBar (40px, plan 50-05) · Toolbar (52px, plan 50-05) · body.
+
+         The body is the handoff's TOP ROW of its 2x2 functional grid (README:55-80):
+         a FIXED 486px left column (top-left = Canvas) and a flexing right column
+         (top-right = Preview above Transport). Both columns are defined HERE, in one
+         place, so plan 51-05 fills column 0 without restructuring this grid a second
+         time.
+
+           · column 0 — `Canvas` (plan 51-05, SHELL-04): the handoff's dotted-grid
+             stage, its `Canvas › ToolPalette` and its zoom chip, above the
+             diagnostic readout. The palette drives the ink layer that sits over the
+             Preview swapchain — see Canvas.xaml.cs.
+           · column 1 — `Preview` (plan 51-04, REAL SwapChainPanel) + `Transport`
+             (44px, plan 50-06) docked to its bottom, per README:118.
+           · column 2 — the labelled `Inspector` placeholder, re-owned by Phase 55.
+
+         The body is now the FULL 2x2 grid. Column 0 holds `Canvas` + `Chat`
+         (plan 54-05, split by a draggable divider) / `Shell.StatusText` / `MediaBin`
+         (plan 53-02) and column 1 holds `Preview` / `Transport` / `Timeline` (plan
+         52-06); the two bottom rows are pinned to the same height so the cross-divider
+         reads as one line (README:75).
+
+         The status readout still renders the REAL mirrored backend state 50-03/50-04
+         put there (probe envelope, cursors, resync count, both poll rates' liveness,
+         and now the Preview attach measurement) — it is not a placeholder for absent
+         data.
+
+         ADDENDUM quick-260731-w45 (2026-07-31): column 0's middle row is NO LONGER A
+         VISIBLE READOUT. It is a ZERO-HEIGHT row that still HOLDS `Shell.StatusText`,
+         which stays in the visual tree purely so UIA can read it. Everything the
+         paragraph above says about the readout's CONTENT is unchanged and still true —
+         `RefreshStatus` is byte-untouched and `.Name` still carries every diagnostic
+         line in full. What changed is that no human sees it: its ~159 logical px went
+         to row 0, taking the Canvas/Chat split from ~113 to ~193 logical px per side
+         at the 50/50 default. Full before/after in this task's
+         `artifacts/w45-uia-probe.md`. -->
+    <!-- AllowDrop on the ROOT, not on a region: the handoff says import accepts a
+         file drop "anywhere on the window" (README:92). DragOver/Drop route into the
+         Toolbar's single shared import routine (T-50-20's mitigation lives there and
+         in the handler below). -->
+    <Grid x:Name="WindowRoot"
+          Background="{StaticResource bg-window}"
+          AllowDrop="True"
+          DragOver="OnWindowDragOver"
+          Drop="OnWindowDrop">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <regions:TitleBar x:Name="TitleBarRegion" Grid.Row="0" />
+        <regions:Toolbar x:Name="ToolbarRegion" Grid.Row="1" />
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <!-- handoff: fixed left column, 486px (README:76). Canvas, plan 51-05. -->
+                <ColumnDefinition Width="486" />
+                <!-- Preview + Transport — flexes to fill the remaining width. -->
+                <ColumnDefinition Width="*" />
+                <!-- Inspector placeholder, Phase 53. Auto = zero while collapsed. -->
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Column 0 is the handoff's Canvas quadrant, and plan 51-05 FILLS it.
+
+                 Two rows rather than one overlay: the diagnostic readout keeps the
+                 whole column's width (see the NoWrap note below — narrowing it
+                 further has a MEASURED cost) while the Canvas keeps the handoff's
+                 own geometry, with the ToolPalette top-left and the zoom chip
+                 bottom-left exactly where README:96 puts them. Layering the readout
+                 ON TOP of the region would have collided with both.
+
+                 The readout still renders the REAL mirrored backend state 50-03/50-04
+                 put there — probe envelope, cursors, resync count, both poll rates'
+                 liveness — it is not a placeholder for absent data. -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <!-- quick-260731-w45: was Height="Auto" (~159 logical px of visible
+                         diagnostics). Now ZERO — the row still HOLDS `Shell.StatusText`,
+                         it just gives it no height. See the ⚠ block on that element. -->
+                    <RowDefinition Height="0" />
+                    <!-- Plan 53-02's ONE row. See the MediaBin note below. -->
+                    <RowDefinition Height="322" MinHeight="140" />
+                </Grid.RowDefinitions>
+
+                <!-- D-01 (owner deviation, 54-CONTEXT): Chat is DOCKED, not floating.
+                     The Canvas row SPLITS — Canvas above, Chat below, 50/50 by default
+                     (D-02), never persisted (D-03). This voids the handoff's
+                     floating/drag/clamp/shadow/minimize Chat clauses
+                     (README:144-145,175,234 + the Chat.MinimizeButton atom, D-04) and
+                     eliminates the whole z-order/hole-punch risk class v6.0 needed
+                     (index.html:335-338) and Phase 51 deleted (SHELL-04): a docked Chat
+                     never overlaps the SwapChainPanel.
+
+                     The divider is HAND-ROLLED (Regions/Chat/ChatSplit.cs) — GridSplitter
+                     is NOT a built-in WinUI 3 control; see 54-01's recorded Option-B
+                     decision, which is settled and must not be re-opened here.
+
+                     SPLITTING THIS ROW DOES NOT MOVE THE 322 CROSS-DIVIDER BELOW, and
+                     that is the claim plan 54-05's UIA proof measures rather than
+                     asserts: `Shell.StatusText` and the `MediaBin` row still own rows 1
+                     and 2 of this column, and the divider's Y is pinned by the MediaBin
+                     row's FIXED height, not by anything inside this row.
+
+                     ⚠ THE TWO MinHeights ARE FLOORS AGAINST DEGENERATE LAYOUT, NOT
+                     COMFORT TARGETS — and the difference was MEASURED, at some cost.
+
+                     They are this plan's numbers, not the handoff's (whose Chat sizing
+                     clauses — a 300x332 float — are void under D-01). 96 is the smallest
+                     Chat in which BOTH the 36px header and the ~44px composer are fully
+                     on screen with a non-zero transcript above it; 80 is the smallest
+                     Canvas that still shows its 38px ToolPalette and its 29px zoom chip.
+                     Below those the rows are not merely cramped, they LOSE CONTROLS.
+
+                     WHY NOT 54-03's RECOMMENDED 160-180 CHAT FLOOR, which is the right
+                     number for a COMFORTABLE transcript: it does not fit in this column
+                     at the shell's actual default window height, and the failure is
+                     silent-then-total. MEASURED on this machine (5120x1440 display at
+                     125%, work area 1390px; the shell opens NOT maximized at 3072x813
+                     LOGICAL px): column 0's body is 721 logical px, of which the MediaBin
+                     row takes a fixed 322 and `Shell.StatusText`'s nine diagnostic lines
+                     take ~159 — leaving 226 logical px for the Canvas, this divider and
+                     the Chat TOGETHER. With a 176 floor the two minimums cannot both fit,
+                     so (a) `ChatSplit.Apply`'s over-constrained guard refuses every drag —
+                     measured, a 60px pull moved the divider 0px — and (b) the Grid clipped
+                     the LAST row's overflow, putting `Chat.Composer` and `Chat.SendButton`
+                     OFFSCREEN (`IsOffscreen=true`), i.e. a Chat you cannot type into.
+                     Both readings are in 54-05's SUMMARY.
+
+                     The comfort number is delivered by the DEFAULT, not by the floor:
+                     two equal `*` rows put ~113px on each side here, and at the handoff's
+                     own 910-tall reference artboard they put ~165px on each side — which
+                     is 54-03's band. The floors only ever bind on a window too short for
+                     the column, and THAT is a window-geometry problem this file already
+                     assigns to a future owner (see the Timeline note's MEASURED LIMIT
+                     paragraph, same shape, same reason). Recorded for 54-06 rather than
+                     fixed here: raising the window's default height would move every
+                     region and re-baseline the capture and GC suites.
+
+                     ── ADDENDUM quick-260731-w45 (2026-07-31) — THE BUDGET ABOVE IS NOW
+                        HISTORY. READ THESE NUMBERS FOR THE SHELL THAT SHIPS. ──
+
+                     The 226 figure is what column 0 had while `Shell.StatusText` was a
+                     VISIBLE ~159-logical-px readout. That row is now ZERO-HEIGHT (see the
+                     RowDefinition above and the ⚠ block on the element itself), and the
+                     `*` row 0 is the only flexible row in this column, so it absorbed
+                     every reclaimed pixel. MEASURED on the same machine, same 3072x814
+                     LOGICAL window — no window-geometry change was made:
+
+                       row 1 (`Shell.StatusText`)   159.2 -> 0     logical
+                       row 0 (Canvas+divider+Chat)  234.4 -> 393.6 logical  (+159.2)
+                       Canvas side @ 50/50 default  114.4 -> 193.6 logical
+                       Chat   side @ 50/50 default  112.0 -> 192.0 logical
+                       MediaBin row top             UNCHANGED (rel-window 605 both runs)
+                       divider travel, 60px pull    clamped (~41 ceiling) -> full 60px
+
+                     So the 50/50 DEFAULT now delivers ~189-194 logical px per side, i.e.
+                     54-03's 160-180 comfort band, at the shell's real default height —
+                     the thing the paragraph above could only get from a 910-tall artboard.
+
+                     THE FLOORS STAY 80 / 96, and that is a decision taken FROM this
+                     measurement, not inertia. Raising them buys nothing (the default
+                     already clears 160 by ~30px) and costs the exact failure pair 54-05
+                     measured: a higher floor sum widens the window-height range in which
+                     `ChatSplit.Apply`'s over-constrained guard freezes the divider AND
+                     WinUI clips `Chat.Composer` offscreen. Floors guard degenerate layout;
+                     the default carries comfort. Unchanged for that reason.
+
+                     There is NO stale cap to remove anywhere in the split math: ChatSplit's
+                     `lo`/`hi` derive from the LIVE total, so freed space reaches both sides
+                     automatically. Verified by the +79.2 / +80.0 per-side split above.
+                     Full readings: this task's `artifacts/w45-uia-probe.md`.
+
+                     Both numbers are READ OFF these RowDefinitions by the drag handlers
+                     (MainWindow.xaml.cs), so the Grid's clamp and ChatSplit's clamp are
+                     one number each and cannot drift apart.
+
+                     D-05's TAB ORDER, MEASURED IN THE RUNNING SHELL rather than assumed
+                     (see the measurement note below the divider). -->
+                <Grid Grid.Row="0" x:Name="CanvasChatSplit">
+                    <Grid.RowDefinitions>
+                        <RowDefinition x:Name="CanvasSplitRow" Height="*" MinHeight="80" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition x:Name="ChatSplitRow" Height="*" MinHeight="96" />
+                    </Grid.RowDefinitions>
+
+                    <regions:Canvas x:Name="CanvasRegion" Grid.Row="0" />
+
+                    <Border x:Name="ChatSplitter" Grid.Row="1" Height="6"
+                            Background="{StaticResource bg-bar}"
+                            BorderBrush="{StaticResource border-hairline}"
+                            BorderThickness="0,1,0,1"
+                            AutomationProperties.AutomationId="Chat.Splitter"
+                            AutomationProperties.Name="Resize canvas and chat"
+                            PointerPressed="OnChatSplitterPressed"
+                            PointerMoved="OnChatSplitterMoved"
+                            PointerReleased="OnChatSplitterReleased"
+                            PointerCanceled="OnChatSplitterReleased"
+                            PointerCaptureLost="OnChatSplitterReleased" />
+
+                    <regions:Chat x:Name="ChatRegion" Grid.Row="2" />
+                </Grid>
+
+                <!-- D-05's TAB ORDER — MEASURED IN THE RUNNING SHELL, not assumed, and
+                     deliberately NOT re-engineered.
+
+                     The handoff's intent (README:162, kept VERBATIM by owner decision) is
+                     Toolbar -> Canvas -> Chat -> Preview/Transport -> MediaBin -> Timeline.
+                     40 real TAB presses against a real launch traverse:
+
+                       Toolbar.ImportButton -> Toolbar.UndoButton -> Toolbar.RedoButton
+                       -> Toolbar.ModeTabs.Edit -> Canvas.ToolPalette.Pointer
+                       -> Chat.KeyButton -> Chat.Composer -> Chat.SendButton
+                       -> MediaBin.ImportMediaButton -> MediaBin.ImportFolderButton
+                       -> MediaBin.Breadcrumb -> Preview.ProgramTab
+                       -> Transport.FrameMenu -> Timeline.Root -> Timeline.AddTrackButton
+                       -> (wraps)
+
+                     i.e. Toolbar -> Canvas -> CHAT -> MediaBin -> Preview/Transport ->
+                     Timeline: the default tree order reads straight DOWN column 0 and then
+                     down column 1, which is exactly the reading D-05's own text blesses.
+                     The ONE difference from the handoff is MediaBin before Preview — a
+                     CROSS-COLUMN ordering that predates this phase, is a pure consequence
+                     of the 2x2 grid's declaration order, and would need TabIndex plumbing
+                     across four regions to change. That is not Chat scope, and no TabIndex
+                     is added here: what D-01 had to get right is that Chat lands
+                     IMMEDIATELY AFTER Canvas, which it does, because it is the next
+                     element in the same column. Also confirmed: the 6px divider is not a
+                     tab stop (it is a Border, not a control), so adding it cost the
+                     keyboard user nothing. -->
+
+
+                <!-- ⚠ `Shell.StatusText` KEEPS its AutomationId across this move —
+                     Phase 50's published-output smoke test, plan 50-09's UIA probe and
+                     plan 51-06 all read it by that id.
+
+                     ⚠ NoWrap + ellipsis is LOAD-BEARING, not cosmetic. Phase 50 wrapped
+                     this block across the FULL window width; in a 486px column the same
+                     text re-flows to roughly four times the line count, and it is rebuilt
+                     and re-laid-out on every mirror notification (~100/s during playback).
+                     That measurably reddened Phase 50's
+                     `no_gen0_collections_during_sustained_playback_with_uia_attached`.
+                     Nothing is hidden by this: UIA reads the TEXT, not the layout, so
+                     `Shell.StatusText`'s Name still carries every line in full — which is
+                     how 50-09's probe and plan 51-06 read it.
+
+                     ════════════════════════════════════════════════════════════════
+                     ⚠⚠ quick-260731-w45 — THIS ELEMENT IS INTENTIONALLY INVISIBLE AND
+                        MUST STAY `Visibility="Visible"`. THAT IS NOT A CONTRADICTION.
+                     ════════════════════════════════════════════════════════════════
+
+                     It is hidden by its LAYOUT SLOT, not by its visibility: its row is
+                     `Height="0"` (see the RowDefinition above) and it carries
+                     `Opacity="0"`. It is still in the visual tree, so it still has an
+                     automation peer — and the peer is the entire point. Its
+                     BoundingRectangle is now `{0,0,0,0}` and `IsOffscreen=true`, both
+                     MEASURED on a real launch, both fine.
+
+                     ⚠ `Visibility="Collapsed"` IS THE KNOWN-WRONG MOVE. A collapsed
+                     element leaves the visual tree and has no automation peer, so it
+                     resolves `(not found)` — measured in this same task, where eight
+                     peerless layout containers all read `(not found)` by id. That
+                     BREAKS `ChatUiaTests.cs:115` outright. Do not "tidy" this element
+                     by collapsing it. Same for deleting it, and same for gating the
+                     `RefreshStatus` assignment that feeds its Name.
+
+                     THREE THINGS MUST HOLD SIMULTANEOUSLY, and each has a live consumer:
+
+                       1. FINDABLE BY AUTOMATIONID — `ChatUiaTests.cs:115` asserts
+                          `FindElement("Shell.StatusText")` is not null.
+                       2. A READABLE, STABLE `BoundingRectangle.Top` —
+                          `ChatUiaTests.cs:331-334` reads it before and after a real
+                          divider drag and asserts it moved 0px (tolerance 2). A fixed
+                          `{0,0,0,0}` satisfies this; instability would not.
+                       3. `.Name` CARRYING EVERY DIAGNOSTIC LINE IN FULL —
+                          `InkHandoffTests.cs:224`, `LayeringProofTests.cs:360` and
+                          `PreviewSurfaceTests.cs:155` read `status.Name` and write it
+                          into COMMITTED evidence artifacts under
+                          `.planning/phases/51-*/artifacts/`. For a TextBlock, `.Name`
+                          comes from `Text` — which is why `RefreshStatus`'s
+                          `StatusText.Text = full` assignment must stay byte-identical.
+
+                     Those three reads are NON-ASSERTIVE in two of the three suites: if
+                     the peer ever disappears they will quietly record
+                     "(Shell.StatusText not found)" into the evidence files without any
+                     test going red. That is why the invariant is written HERE, at the
+                     element, and why w45 verified the regenerated artifact's CONTENT
+                     rather than just a green run.
+
+                     `Opacity="0"` is DEFENCE IN DEPTH, NOT THE MECHANISM. A control run
+                     with the zero-height row and NO opacity produced an equally invisible
+                     panel (WinUI clips the NoWrap text to its zero-height slot) and
+                     byte-identical UIA readings. It is kept because it costs nothing, it
+                     is UIA-inert, and it states the intent next to the invariant. Both
+                     runs are in the task's `artifacts/w45-uia-probe.md`. -->
+                <TextBlock x:Name="StatusText"
+                           Grid.Row="1"
+                           Text="starting…"
+                           Foreground="{StaticResource text-primary}"
+                           FontFamily="Calibri"
+                           FontSize="13"
+                           Margin="16"
+                           Opacity="0"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           HorizontalAlignment="Left"
+                           VerticalAlignment="Bottom"
+                           AutomationProperties.AutomationId="Shell.StatusText" />
+
+                <!-- `MediaBin` - the handoff's BOTTOM-LEFT quadrant (plan 53-02,
+                     SHELL-03), the real virtualized tile grid over mirrored state.
+
+                     THE HEIGHT IS COPIED, NOT CHOSEN. The handoff requires the 2x2
+                     grid's cross-divider to read as ONE clean line (README:75). Column 0
+                     and Column 1 are independent nested Grids, so the only way to honor
+                     that is to give this row the SAME height Column 1's Timeline row
+                     has: both columns then pin their bottom row to the same height, so
+                     both dividers land at the same Y regardless of window height. 322 /
+                     140 were READ OFF Column 1's third RowDefinition at execution time
+                     (Phase 52 owns that number and was live on this file); if it ever
+                     moves, this must move with it, or the cross breaks silently.
+
+                     WHY `Shell.StatusText` IS STILL HERE, HIDDEN - the obvious review
+                     question, restated by quick-260731-w45 (2026-07-31).
+
+                     HISTORY (still true, and the reason the element sits in this row at
+                     all): it never had to MOVE when plan 53-02 took this bottom row. This
+                     row is bottom-pinned at a fixed height and the Canvas's row is `*`, so
+                     the readout ate from the flexible space ABOVE it and the 322
+                     cross-divider's Y was unaffected either way.
+
+                     NOW: w45 removed the readout from VIEW — its row is `Height="0"` and
+                     the TextBlock carries `Opacity="0"` — and the ~159 logical px it used
+                     to occupy went to the `*` row above. The element itself was NOT
+                     deleted and NOT collapsed, because the same UIA consumers still read
+                     it: Phase 50's published-output smoke test, plan 50-09's probe, plan
+                     51-06, `ChatUiaTests` (presence + rect stability) and three suites
+                     that write its `.Name` into committed evidence artifacts. The full
+                     invariant, and why `Visibility="Collapsed"` is the known-wrong move,
+                     is at the element itself — see the ⚠⚠ block above it.
+
+                     WHAT THIS ROW DID NOT DO IS MOVE: MEASURED before and after w45, the
+                     MediaBin row's top edge sits at the identical window-relative y (605
+                     physical, from `MediaBin.Header`; `MediaBin.RegionTag` 619 in both).
+                     The cross-divider still reads as one clean line, and this row, its
+                     `Height="322" MinHeight="140"` and the element below are byte-
+                     untouched by that task.
+
+                     CROSS-PHASE CONTRACT, same shape as the Timeline note below: Phase
+                     51 owns this file's SHAPE, Phase 52 owns Column 1's Timeline row,
+                     and Phase 53 owns THIS ROW and nothing else in this file. -->
+                <regions:MediaBin x:Name="MediaBinRegion" Grid.Row="2" />
+            </Grid>
+
+            <!-- Preview + Transport. The handoff docks Transport to the BOTTOM of
+                 Preview (README:118), and that docking contract is what plan 50-06
+                 made real: two rows, Preview flexing above a fixed 44px bar, both on
+                 the SAME `bg-preview` background — which is also why swapping the panel
+                 above for a real SwapChainPanel changed nothing in this bar.
+
+                 Preview's ~220px min height is the handoff's (README:174).
+
+                 ⚠ Preview is now a REAL Rust-owned swapchain surface (plan 51-04,
+                 SHELL-04). Phase 50's labelled placeholder is DELETED, not hidden.
+                 There is still no child-window hosting and no airspace workaround of
+                 any kind here — the ink overlay, dialogs and the Canvas are ordinary
+                 XAML siblings in this same visual tree, which is the entire point of
+                 the phase. A grep for the Win32 window-parenting/region APIs over
+                 shell/ returns zero and that is a mechanical gate (plan 51-01). -->
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" MinHeight="220" />
+                    <RowDefinition Height="Auto" />
+                    <!-- Plan 52-06's ONE row. See the Timeline note below. -->
+                    <RowDefinition Height="322" MinHeight="140" />
+                </Grid.RowDefinitions>
+
+                <regions:Preview x:Name="PreviewRegion" Grid.Row="0" />
+                <regions:Transport x:Name="TransportRegion" Grid.Row="1" />
+
+                <!-- `Timeline` - the handoff's BOTTOM-RIGHT quadrant (plan 52-06,
+                     SHELL-05), the real custom-drawn, viewport-culled clip surface.
+
+                     CROSS-PHASE CONTRACT, stated because both phases were live on
+                     this file at once: Phase 51 owns this file's SHAPE - the 2x2 grid,
+                     the Canvas column, the Preview/Transport subtree's internals.
+                     Phase 52 owns this ROW and nothing else in this file. The edit is
+                     purely additive for that reason: one RowDefinition and one element.
+
+                     THE ROW SPLIT. The handoff's default is a ~452px top row with the
+                     rest below (README:173), and it is meant to be draggable. 322px is
+                     that default expressed from the other end, and it is EXACT at the
+                     reference artboard: 910 window - 40 TitleBar - 52 Toolbar - 44
+                     Transport - 322 = 452. Pinning the BOTTOM row rather than the top
+                     one is what keeps this hunk additive - the Preview row's own `*`
+                     and its 220px minimum (README:174) are untouched - and the
+                     Timeline's own ~140px minimum is here so ruler + 1-2 lanes always
+                     show. The draggable splitter itself is not this plan's.
+
+                     MEASURED LIMIT, recorded rather than claimed past: that 140 holds
+                     while the window has room for it. Below roughly a 630px-tall
+                     window the grid is over-constrained (Preview's 220 + Transport's
+                     44 + Timeline's 140 + 92 of chrome) and the Timeline is the row
+                     that yields - measured at 132.8 logical px in a 620px window. A
+                     window-level minimum size is the real fix and belongs to whichever
+                     plan owns window geometry. -->
+                <regions:Timeline x:Name="TimelineRegion" Grid.Row="2" />
+            </Grid>
+
+            <!-- Toolbar.ModeTabs = Color reveals THIS, and nothing more.
+
+                 `Inspector` stays a DEFERRED surface. PHASE 53 DID NOT BUILD IT, and
+                 that is a decision rather than an omission: v6.0 ships no Inspector at
+                 all (`grep -rn -i inspector frontend/` = zero hits), so there was
+                 nothing to be at parity with, and the handoff's Inspector spec
+                 (README:149) is COLOUR GRADING, which CLAUDE.md defers to v2 and for
+                 which no backend command exists. Owner decision D-01, 2026-07-30;
+                 ROADMAP SC-1 was amended accordingly by plan 53-01 rather than
+                 quietly under-delivered against.
+
+                 Re-owned by PHASE 55's integrated parity gate, which is where the
+                 nine-region claim gets decided against a real build.
+
+                 Per CLAUDE.md rule 1 an explicitly-labelled placeholder is permitted
+                 here where a fake grading UI is not: no sliders, no curves, nothing
+                 implying an operation exists. -->
+            <Border x:Name="InspectorPlaceholder"
+                    Grid.Column="2"
+                    Visibility="Collapsed"
+                    Width="300"
+                    Background="{StaticResource bg-bar}"
+                    BorderBrush="{StaticResource border-hairline}"
+                    BorderThickness="1,0,0,0">
+                <TextBlock Text="Inspector — deferred surface (Phase 55)"
+                           Foreground="{StaticResource text-tertiary}"
+                           FontFamily="Calibri"
+                           FontSize="12"
+                           Margin="16"
+                           TextWrapping="Wrap"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           TextAlignment="Center"
+                           AutomationProperties.AutomationId="Inspector.Placeholder"
+                           AutomationProperties.Name="Inspector, deferred surface" />
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

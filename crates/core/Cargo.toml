@@ -1,0 +1,24 @@
+[package]
+# Package is named `core` so the verification gate `cargo test -p core` works.
+# The lib target is renamed to `rudis_core` so it never collides with Rust's
+# built-in `core` crate in dependents (`use rudis_core::...`).
+name = "core"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis domain core: Project/Timeline/Track/Clip/MediaBin model + command/undo engine. Pure logic — no ffmpeg, no wgpu, no I/O, no network."
+publish = false
+license.workspace = true
+
+[lib]
+name = "rudis_core"
+path = "src/lib.rs"
+
+[dependencies]
+# OFFLINE GUARANTEE: this crate must stay free of network/HTTP/socket crates
+# (no reqwest/hyper/ureq/curl/tokio-net/...). serde is data-only; thiserror is
+# derive-only. Enforced by tests/offline_guard.rs.
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"

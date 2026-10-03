@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Rudis.Shell.Regions.Preview"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:regions="using:Rudis.Shell.Regions"
+    FontFamily="Calibri">
+
+    <!--
+      Preview — the region name is the handoff's, character-for-character
+      (design_handoff_rudis_editor/README.md:33,108; CLAUDE.md rule 7 / D-19).
+
+      EVERY colour is a {StaticResource} token key from Theme/Tokens.xaml. A raw-hex
+      literal here is a build FAILURE (MechanicalGatesTests.
+      no_raw_hex_outside_the_token_dictionary, which enumerates shell/Rudis.Shell/**
+      for .cs and .xaml and therefore covers this file the moment it exists).
+
+      ⚠ THIS REPLACES PHASE 50's LABELLED PLACEHOLDER — that Border and its
+      `Preview.Placeholder` TextBlock are DELETED, not hidden. A labelled placeholder
+      where a real surface now exists would be a lie (CLAUDE.md rule 1).
+
+      ═══ WHAT IS ACTUALLY HAPPENING HERE ═══
+
+      `PreviewPanel` is a WinUI 3 SwapChainPanel whose swapchain is created, owned,
+      configured and presented into by RUST — the whole Phase-44 Path B chain
+      promoted to production (crates/ffi/src/panel/**). The C# side hands over a COM
+      pointer once, forwards size/scale notifications, and hands it back at teardown.
+      It never touches a frame, never runs a clock, and never composites anything
+      (D-08 / SHELL-06). See Preview.xaml.cs.
+
+      Consequently the two TextBlocks below are ORDINARY XAML SIBLINGS drawn above a
+      hardware-composited swapchain, in the same visual tree — no child window, no
+      airspace workaround, no region machinery of any kind. That layering is the
+      deliverable this whole phase exists to make possible, and plan 51-06 proves it
+      in pixels for the three cases the old occluder fix never covered.
+
+      ═══ LETTERBOXING IS THE COMPOSITOR'S, NOT XAML's ═══
+
+      The handoff says "full-bleed video surface (letterboxed to `bg-preview` black)"
+      and "Video uses contain-fit (letterbox), never crops" (README:110,113). Both are
+      already true on the Rust side: engine::contain_fit_viewport is the same formula
+      the compositor letterboxes with, and `bg-preview` IS that letterbox colour. So
+      the Grid's background is the token and NOTHING here re-derives contain-fit math
+      (D-12: two models of one truth). The exact content sub-rect is available to the
+      Canvas region as a PULL — rudis_preview_content_rect / RudisPreviewRect.
+
+      ═══ HANDOFF ELEMENTS NOT IN THIS PLAN ═══
+
+      The region tag "PREVIEW", the `1080p · 24fps` badge, the bottom-right time
+      readout and the centred Transport.FullscreenButton are handoff Preview contents
+      that are deliberately ABSENT here rather than faked: the time readout already
+      lives in Transport (plan 50-06's recorded placement decision), and the badge
+      needs real mirrored stream metadata. Adding an inert chrome that implies a
+      capability would be exactly the placeholder this plan is deleting.
+    -->
+
+    <UserControl.Resources>
+
+        <!-- ═══ The monitor tab (plan 52-13) ═══
+
+             An explicit, token-only ControlTemplate per the 50-05 region pattern, so
+             nothing inherits a WinUI system brush — which would be raw hex by proxy
+             and would make the rule-7 gate meaningless.
+
+             The ACTIVE/INACTIVE treatment is not in this template: it is set from the
+             MIRROR in Preview.xaml.cs (Foreground `accent` vs `text-secondary`,
+             Background `bg-segment-active` vs Transparent), the same shape
+             Transport.ApplyLoopTint already uses for a mirror-derived tint. A visual
+             state cannot express it, because "which monitor is active" is backend
+             state rather than pointer state. -->
+        <Style x:Key="PreviewMonitorTabStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-control}" />
+            <Setter Property="Padding" Value="10,3,10,4" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <Grid x:Name="PreviewRoot"
+          Background="{StaticResource bg-preview}"
+          AutomationProperties.AutomationId="Preview.Root"
+          AutomationProperties.Name="Preview">
+
+        <!-- The Rust-owned surface. AutomationId + Name follow the proven shape of
+             Transport.Root (plan 50-06): a non-control FrameworkElement carrying both
+             is findable by UIA and its BoundingRectangle readable, which is what plan
+             51-06's captures crop to. -->
+        <SwapChainPanel x:Name="PreviewPanel"
+                        AutomationProperties.AutomationId="Preview.Surface"
+                        AutomationProperties.Name="Preview surface"
+                        AutomationProperties.AccessibilityView="Content" />
+
+        <!-- Handoff's own string for the *No project/empty* state (README:114).
+
+             Collapses on TWO conditions, not one: the engine reports a composite has
+             actually happened AND the mirrored project actually contains media. See
+             Preview.xaml.cs's TryCollapseEmptyState, which records the measured 3/3
+             red (plan 54-08) that the one-condition version produced — the engine
+             composites its own placeholder into an attached panel whether or not
+             there is anything to show, so "a composite happened" alone collapsed this
+             message on the empty FIRST-RUN launch, where it is the only thing on
+             screen worth reading.
+
+             ⚠ It starts VISIBLE, with no explicit Visibility here, and that is
+             load-bearing: an empty project must show this from the first frame the
+             window paints, without waiting for any signal to arrive. -->
+        <TextBlock x:Name="PreviewEmptyState"
+                   Text="Open or import media to preview"
+                   Foreground="{StaticResource text-tertiary}"
+                   FontSize="13"
+                   FontWeight="SemiBold"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   AutomationProperties.AutomationId="Preview.EmptyState"
+                   AutomationProperties.Name="Preview empty state" />
+
+        <!-- A backend refusal must be VISIBLE, never swallowed (the rule plan 50-05
+             already applies to import, and UI-SPEC §5's error row). Carries the
+             attach failure's NAMED status: NotASwapChainPanel / WrongThread /
+             SurfaceCreateFailed are the three that can realistically appear.
+             No red/danger token exists anywhere in the handoff, so this uses
+             `text-tertiary` on `bg-elevated` rather than inventing hex (rule 7). -->
+        <Border x:Name="PreviewErrorState"
+                Visibility="Collapsed"
+                Background="{StaticResource bg-elevated}"
+                CornerRadius="{StaticResource radius-panel}"
+                Padding="14"
+                MaxWidth="420"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+            <TextBlock x:Name="PreviewErrorStateText"
+                       Foreground="{StaticResource text-tertiary}"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="Preview.ErrorState"
+                       AutomationProperties.Name="Preview error state" />
+        </Border>
+
+        <!-- ═══ THE MONITOR SWITCH (plan 52-13) ═══
+
+             ⚠ THIS IS v6 PARITY, NOT A DESIGN-HANDOFF ELEMENT, and saying so is the
+             point of this paragraph. The handoff's `Preview` contents list no monitor
+             tabs at all (README:108-114). What this ports is v6.0's own pair of tab
+             buttons — frontend/src/main.ts:717-742 — verbatim in behaviour: Program is
+             labelled "Timeline", Source is HIDDEN until a clip is loaded and then reads
+             `Source · <basename>`, and the active tab is derived from `previewMode`.
+
+             It exists because `TransportCmd::SetPreviewMode` (transport.rs:89-97) had
+             ZERO call sites anywhere under shell/ — the only textual match in the whole
+             tree was inside a doc comment — while the CLI import route and a MediaBin
+             double-click both issue `load_preview`, which pins `preview_mode` to
+             Source (transport.rs:86). With no way back, the Preview could never show
+             the timeline composite, and a timeline edit correctly changed nothing on
+             screen. That is the whole root cause of the owner's D4
+             (.planning/debug/timeline-52-uat-d1-d4.md § Evidence 09:48Z), and this
+             strip is its fix. Recorded here rather than only in a plan so Phase 55's
+             parity gate meets it as data instead of as unexplained chrome.
+
+             Declared BEFORE the ink layer so the ink layer stays the LAST child and
+             keeps compositing above everything (51-05's D-11 — moving it would
+             silently undo a property another phase proved in pixels). The tabs are
+             still clickable through it: `InkRoot.IsHitTestVisible` is false until a
+             drawing tool is chosen, so with the Pointer tool selected the layer is
+             inert and the pointer reaches what is underneath.
+
+             ⚠ TEXT, NOT GLYPHS, and deliberately so. Windows 10 ships no Segoe Fluent
+             Icons and a private-use-area codepoint has no font fallback, so a pinned
+             icon family renders NOTHING — not even a tofu box (50-05's measured trap).
+             These labels are ordinary text, and no icon font is involved anywhere in
+             this strip. -->
+        <StackPanel x:Name="MonitorTabs"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    Margin="8,8,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    AutomationProperties.AutomationId="Preview.MonitorTabs"
+                    AutomationProperties.Name="Preview monitor">
+            <Button x:Name="ProgramTab"
+                    Style="{StaticResource PreviewMonitorTabStyle}"
+                    Content="Timeline"
+                    AutomationProperties.AutomationId="Preview.ProgramTab"
+                    AutomationProperties.Name="Timeline monitor" />
+            <!-- Collapsed until `source_playback.loaded_media_id` is non-null, exactly
+                 as v6 hides `#tab-source` (main.ts:730). A tab that switches to an
+                 empty monitor is worse than no tab. -->
+            <Button x:Name="SourceTab"
+                    Style="{StaticResource PreviewMonitorTabStyle}"
+                    Content="Source"
+                    Visibility="Collapsed"
+                    AutomationProperties.AutomationId="Preview.SourceTab"
+                    AutomationProperties.Name="Source monitor" />
+        </StackPanel>
+
+        <!-- THE Canvas region's ink layer (plan 51-05, D-11) — the LAST child, so it
+             composites above the swapchain and above both state overlays.
+
+             It is an ORDINARY TRANSPARENT XAML SIBLING. That sentence is the whole
+             phase: the Win32 WndProc subclass this replaces
+             (src-tauri/src/canvas_input.rs) exists only because a child HWND at
+             HWND_TOP swallowed input the WebView never saw, and under a
+             SwapChainPanel that problem does not exist. Nothing is reparented,
+             nothing is hole-punched, and the layer is inert (not hit-testable) until
+             a drawing tool is selected in the Canvas region's palette. -->
+        <regions:PreviewInkLayer x:Name="InkLayer" />
+    </Grid>
+</UserControl>

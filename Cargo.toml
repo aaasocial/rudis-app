@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = ["crates/engine", "crates/core", "crates/app-core", "crates/preview", "crates/agent-mcp", "crates/agent-tools", "crates/agent-llm", "crates/agent-gen", "crates/ffi", "crates/waveform", "crates/filmstrip", "crates/proxy", "crates/rendercache", "crates/composition-scale", "crates/timeline-render"]
+# `crates/rendercache` added by plan 59-02 (CACHE-03/CACHE-04). A LEAF crate,
+# deps `core` + `engine` only (+ serde/serde_json) — placed beside `crates/proxy`
+# deliberately, because it IS `crates/proxy` one altitude up: the same
+# magic+version meta, the same meta-last atomic commit, the same fail-closed
+# read, the same byte-budget LRU, keyed on a whole segment's composite inputs
+# instead of on one media file. `preview` and `app-core` may depend on it; it
+# depends on NEITHER, so the `preview -> rendercache` edge that lands in 59-05
+# cannot create a cycle (59-CONTEXT D-39).
+# NAMING HAZARD: `crates/timeline-render` below is something else entirely — the
+# C# shell's Timeline REGION renderer (Phase 52, its own wgpu major). Never link
+# the two, never extend that one for this.
+# `crates/proxy` added by plan 58-02 (PROXY-05). A LEAF crate, deps `engine`
+# only (+ serde/serde_json) — the same shape as `crates/filmstrip` and
+# `crates/waveform`, placed beside them deliberately so the dependency graph
+# stays acyclic: `preview` and `app-core` may depend on it, it depends on
+# neither.
+# `crates/composition-scale` added by plan 52-12 (F1b). A LEAF crate with one
+# dependency, consumed by BOTH panel-backed surfaces — `crates/ffi` (the
+# Preview, wgpu 26) and `crates/timeline-render` (the Timeline, wgpu 29) — which
+# is why its API takes a raw COM pointer rather than a `wgpu::Surface`: a typed
+# surface reference could only ever serve one of the two majors. It is neither
+# `crates/preview` nor `crates/core`, both of which are frozen.
+# `crates/timeline-render` PROMOTED here by plan 52-04, on the strength of
+# 52-01's `VERDICT: GO`. It carries a SECOND, INDEPENDENT `wgpu` major (29)
+# beside the frozen 26 that `crates/engine` pins — deliberately
+# (52-CONTEXT D-02: no released `glyphon` targets wgpu 26 or 27, so sharing the
+# frozen pin would mean hand-rolling text rendering). Two majors resolving in
+# one lock is the accepted, measured cost; see
+# `.planning/phases/52-timeline-region/artifacts/52-04-renderer.md`.
+# Throwaway Phase-44 hwaccel spike. EXCLUDED, never a member: root `cargo build`/
+# `cargo test` must not compile it, so spike code structurally cannot reach a
+# shipped binary. See spikes/44-hwaccel/README.md.
+exclude = ["spikes/44-hwaccel"]
+
+# Phase 68 (OSS-04): one licence for every first-party crate, inherited by each member via
+# `license.workspace = true`. AGPL-3.0-ONLY, not -or-later: the owner holds the copyright,
+# so no future licence text can change the terms without the owner choosing it, and a
+# commercial dual-licence stays available (68-CONTEXT D-01). LICENSE is the verbatim FSF text.
+[workspace.package]
+license = "AGPL-3.0-only"
+
+# `[profile.*]` is read ONLY from the workspace root manifest — a member's own
+# profile table is silently ignored (cargo warns once and moves on). Promoting
+# `crates/timeline-render` therefore would have DROPPED the `debug = true` its
+# standalone manifest carried, and that setting is load-bearing: the cdylib is
+# loaded by a C# process, and without MSVC PDBs from the release profile a
+# native fault inside it is a bare address with no symbol — which is exactly the
+# situation 52-01 had to escape when its teardown crash landed inside a P/Invoke.
+# A PACKAGE-SCOPED override keeps the property for the one crate that needs it
+# without adding debuginfo to every other release artifact in the workspace.
+[profile.release.package.timeline-render]
+debug = true

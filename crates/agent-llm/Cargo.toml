@@ -1,0 +1,52 @@
+[package]
+name = "agent-llm"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis real-Claude agent transport + orchestration loop (Phase 12): LlmTransport (real reqwest client + FixtureTransport), hand-authored tool schemas over rudis_core::tools::Tool, the versioned MOAT-01 rulebook, and the run_turn orchestration loop. One of the two sanctioned network-egress crates (reqwest); the other is agent-gen (Phase 31, external generation) -- CLAUDE.md's 'only AI calls touch network' exception."
+publish = false
+license.workspace = true
+
+[dependencies]
+# The shared, single-source-of-truth tool-schema crate (Phase 16, TOOL-06/D-01)
+# — this crate's tools.rs is now a thin adapter over it.
+agent-tools = { path = "../agent-tools" }
+base64 = "0.22"
+core = { path = "../core" }
+# BYO-key OS-credential storage (Phase 15, AUTH-02). Default features pull in the
+# platform-native backend (Windows Credential Manager on the shipped target).
+# Confined to this crate ONLY — never a direct dependency of the host cdylib
+# `crates/ffi` (nor, historically, of the retired `src-tauri`); `cargo test`
+# NEVER constructs `KeyringStore` (every test drives `InMemoryKeyStore`).
+# Enforced by `crates/ffi/tests/offline_guard.rs::keyring_is_reachable_only_via_agent_llm`.
+keyring = "4.1"
+reqwest = { version = "0.13", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+# TEST-ONLY: the v1 media engine (decode/composite/encode). Used SOLELY by
+# tests/tool_result_image.rs to prove the image-bearing ToolResult path on a
+# REAL decoded+composited frame (Phase 16, TOOL-06 SC-3) — mirrors
+# crates/agent-mcp/Cargo.toml's exact precedent. agent-llm's own runtime code
+# never imports `engine`.
+engine = { path = "../engine" }
+# TEST-ONLY: decodes the base64-extracted JPEG payload back to real image
+# bytes in tests/tool_result_image.rs (the literal SC-3 "decodes to valid,
+# non-empty image bytes" assertion). Same crate/version engine already uses.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Lets a plain `#[test]` drive run_turn's `async fn` without adding tokio as a
+# runtime dependency (12-RESEARCH.md's explicit "not adding tokio"). Already a
+# vetted, permissively-licensed workspace dependency via crates/engine.
+pollster = "0.4"
+# TEST-ONLY (Phase 38, EVAL-01): a real async runtime for the #[ignore]-gated
+# live-eval gate (tests/agent_eval_live.rs). pollster::block_on panics ("no
+# reactor running") the moment a REAL reqwest call runs inside run_turn, so the
+# live test uses #[tokio::test]. Same major version already resolved in-workspace
+# via the host cdylib `crates/ffi` and agent-mcp — no new Cargo.lock version to
+# reconcile.
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# TEST-ONLY (Phase 38): load the untracked repo-root .env for the live-eval key,
+# exactly as the generation host's live-provider tests do. Same version already
+# pinned in `crates/ffi/Cargo.toml`.
+dotenvy = "0.15"

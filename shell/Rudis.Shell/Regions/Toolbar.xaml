@@ -1,0 +1,545 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Rudis.Shell.Regions.Toolbar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Height="{StaticResource height-Toolbar}"
+    FontFamily="Calibri">
+
+    <!--
+      Toolbar — the region name is the handoff's, character-for-character
+      (design_handoff_rudis_editor/README.md:30,88; CLAUDE.md rule 7).
+
+      EVERY colour and metric is a {StaticResource} token key from Theme/Tokens.xaml.
+      A raw-hex literal here is a build FAILURE (MechanicalGatesTests, plan 50-07).
+
+      Layout (handoff:90-91): fixed 52px, gap 8. Import + undo/redo pinned LEFT;
+      Toolbar.ModeTabs CENTERED; Toolbar.ExportButton pinned RIGHT.
+
+      ⚠ EVERY control here either dispatches a REAL backend command or is an
+      explicitly-labelled placeholder (D-13, CLAUDE.md rule 1). Nothing is
+      fake-functional:
+        Toolbar.ProjectButton -> rudis_new_project / rudis_open_project /
+                                 rudis_open_project_at_path / rudis_get_projects /
+                                 rudis_save_project / rudis_save_project_as
+        Toolbar.ImportButton  -> rudis_import_media
+        Toolbar.UndoButton    -> rudis_undo
+        Toolbar.RedoButton    -> rudis_redo
+        Toolbar.ExportButton  -> rudis_export_timeline (on the interop worker)
+        Toolbar.ModeTabs      -> NO backend; shell view-state only, and Color shows a
+                                 LABELLED placeholder because Inspector is deferred.
+    -->
+
+    <UserControl.Resources>
+
+        <!-- ═══ Outlined (Toolbar.ImportButton) ═══
+             Handoff: outlined `border-strong`. Hover fill is UI-SPEC gap 2 →
+             `bg-elevated` (its own recommendation). -->
+        <Style x:Key="ToolbarOutlinedButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-primary}" />
+            <Setter Property="BorderBrush" Value="{StaticResource border-strong}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-control}" />
+            <Setter Property="Padding" Value="11,0,11,0" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-elevated}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              FontWeight="{TemplateBinding FontWeight}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ Flat glyph (Undo / Redo / overflow) ═══
+             Handoff: `text-secondary`; DISABLED renders `text-tertiary`,
+             non-interactive (UI-SPEC §5). -->
+        <Style x:Key="ToolbarGlyphButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-control}" />
+            <Setter Property="Padding" Value="8,0,8,0" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinWidth" Value="32" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <!-- Responsive (handoff:91 / UI-SPEC §2) is driven from code, in
+             Toolbar.xaml.cs's ApplyResponsiveLayout, off this Border's SizeChanged.
+
+             ⚠ MEASURED 2026-07-30, recorded because the obvious XAML answer does NOT
+             work here: an AdaptiveTrigger/VisualState arrangement was implemented
+             first, tried BOTH on this Border and one level deeper on the inner Grid,
+             and NEITHER took effect at 640 or 460 px (transcript in
+             artifacts/50-05-regions.md). SizeChanged is deterministic, keys off the
+             REGION's own width rather than the window's, and is trivially checkable.
+             Do not "restore" the AdaptiveTriggers without re-measuring. -->
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-elevated}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ Brand fill (Toolbar.ExportButton) ═══
+             Handoff: fill `accent`, text `on-accent`. Hover → `accent-bright`
+             (UI-SPEC gap 2). DISABLED fill is UI-SPEC GAP 4 — the handoff gives a
+             busy state but no disabled fill; resolved as `bg-elevated` +
+             `text-tertiary`, matching every other disabled control in the bar,
+             and recorded in artifacts/50-05-regions.md.
+
+             The glow (`0 2px 8px rgba(109,84,232,.35)`, UI-SPEC §1 elevation) is
+             OMITTED — see the artifact's decision entry. Padding is 0 so the
+             busy-fill content can span the whole button. -->
+        <Style x:Key="ToolbarAccentButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource accent}" />
+            <Setter Property="Foreground" Value="{StaticResource on-accent}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="{StaticResource radius-control}" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinWidth" Value="104" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource accent-bright}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource accent-bright}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-elevated}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              HorizontalContentAlignment="Stretch"
+                                              VerticalContentAlignment="Stretch" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ One segment of Toolbar.ModeTabs ═══
+             RadioButton, not ToggleButton: a radio group gives single-selection
+             semantics AND arrow-key navigation within the group for free, which is
+             exactly UI-SPEC §5's "ModeTabs (arrow keys within)". -->
+        <Style x:Key="ModeSegmentStyle" TargetType="RadioButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="Padding" Value="14,0,14,0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{StaticResource radius-control}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed" />
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualState x:Name="Unchecked" />
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource bg-segment-active}" />
+                                            <Setter Target="Label.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Indeterminate" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Label"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              FontWeight="{TemplateBinding FontWeight}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <Border x:Name="ToolbarRoot"
+            SizeChanged="OnToolbarSizeChanged"
+            Background="{StaticResource bg-bar}"
+            BorderBrush="{StaticResource border-hairline}"
+            BorderThickness="0,0,0,1"
+            KeyboardAcceleratorPlacementMode="Hidden">
+
+        <!-- Keyboard: Ctrl+Z undo, Ctrl+Y redo, Ctrl+I import, Ctrl+E export
+             (UI-SPEC §3 / handoff:92). Declared on the REGION ROOT rather than on the
+             individual buttons: a KeyboardAccelerator on a Collapsed element does not
+             fire, and undo/redo collapse into the overflow at narrow widths, so
+             button-hosted accelerators would silently stop working exactly when the
+             window is small. No ScopeOwner => window-scoped.
+             Ctrl+, (Settings, Phase 69) lives on this same root but is added in
+             Toolbar.xaml.cs: VirtualKey has no comma member, so markup cannot spell it. -->
+        <Border.KeyboardAccelerators>
+            <KeyboardAccelerator Modifiers="Control" Key="I" Invoked="OnImportAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="Z" Invoked="OnUndoAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="Y" Invoked="OnRedoAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="E" Invoked="OnExportAccelerator" />
+            <!-- ⚠ DEVIATION FROM THE HANDOFF, recorded here rather than left to drift.
+                 The handoff assigns Ctrl+I / Ctrl+E / Ctrl+Z / Ctrl+Y (README:92) and
+                 names NO shortcut for the project lifecycle, because when it was written
+                 the shell had no project lifecycle to name one for. Ctrl+N / Ctrl+O /
+                 Ctrl+S are THIS PLAN's choice; they are what Premiere, Resolve, Final Cut
+                 and every Windows application since 1995 use for exactly these three, so
+                 inventing different ones to stay literally inside the handoff would have
+                 been worse for the beginner the handoff exists to serve.
+
+                 AND THE ROOT NOW CARRIES KeyboardAcceleratorPlacementMode="Hidden"
+                 (above), which quick 260731-k1a paid for on the Timeline: the property
+                 defaults to Auto, under which WinUI renders a hover tooltip on the
+                 element HOSTING the accelerator - and that host is this whole region.
+                 Hidden changes PRESENTATION ONLY. It is not IsEnabled="False" and it
+                 removes nothing; every accelerator here still fires. The fix for a stray
+                 accelerator tooltip is NEVER to delete an accelerator. -->
+            <KeyboardAccelerator Modifiers="Control" Key="N" Invoked="OnProjectNewAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="O" Invoked="OnProjectOpenAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="S" Invoked="OnProjectSaveAccelerator" />
+        </Border.KeyboardAccelerators>
+
+        <Grid x:Name="ToolbarGrid" Padding="12,0,12,0">
+            <!-- Responsive (handoff:91 / UI-SPEC §2). Two breakpoints, ordered so the
+                 LAST matching AdaptiveTrigger wins:
+                   Narrow  (<520)   undo/redo in the overflow, mode tabs → ICONS
+                   Medium  (>=520)  undo/redo in the overflow, mode tabs LABELLED
+                   Wide    (>=760)  everything inline
+                 The handoff names only the 520 label→icon breakpoint and says
+                 undo/redo collapse "at narrow widths" without a number; 760 is this
+                 phase's choice, recorded in artifacts/50-05-regions.md. -->
+            <VisualStateManager.VisualStateGroups>
+                <VisualStateGroup x:Name="WidthStates">
+                    <VisualState x:Name="NarrowState">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="0" />
+                        </VisualState.StateTriggers>
+                        <VisualState.Setters>
+                            <Setter Target="UndoRedoInline.Visibility" Value="Collapsed" />
+                            <Setter Target="OverflowButton.Visibility" Value="Visible" />
+                            <Setter Target="EditTab.Content" Value="&#x2702;" />
+                            <Setter Target="ColorTab.Content" Value="&#x25D0;" />
+                        </VisualState.Setters>
+                    </VisualState>
+                    <VisualState x:Name="MediumState">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="520" />
+                        </VisualState.StateTriggers>
+                        <VisualState.Setters>
+                            <Setter Target="UndoRedoInline.Visibility" Value="Collapsed" />
+                            <Setter Target="OverflowButton.Visibility" Value="Visible" />
+                        </VisualState.Setters>
+                    </VisualState>
+                    <VisualState x:Name="WideState">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="760" />
+                        </VisualState.StateTriggers>
+                        <VisualState.Setters>
+                            <Setter Target="UndoRedoInline.Visibility" Value="Visible" />
+                            <Setter Target="OverflowButton.Visibility" Value="Collapsed" />
+                        </VisualState.Setters>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+
+            <!-- LEFT: import + undo/redo (+ the narrow-width overflow) -->
+            <StackPanel Orientation="Horizontal"
+                        Spacing="{StaticResource gap-toolbar}"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center">
+                <!-- ═══ Toolbar.ProjectButton ═══
+                     Handoff:88 - "Global project actions and the workspace mode
+                     switch". New / Open / Save ARE the global project actions, and
+                     until this plan the region had the second half of that sentence and
+                     none of the first: the owner could not open a .rud sitting in the
+                     very folder the app manages.
+
+                     A MenuFlyout, following Toolbar.OverflowButton's precedent further
+                     down this same file, so five entries cost one slot in a 52px bar.
+
+                     ⚠ TWO ROUTES INTO A PROJECT, BOTH REAL, NEITHER A DUPLICATE:
+                       Open...     -> rudis_open_project_at_path  (the user chose a
+                                      FILE, from anywhere on disk)
+                       Open Recent -> rudis_open_project          (the app ENUMERATED
+                                      it, and the name is how both the registry and the
+                                      agent address it)
+                     Deleting either removes a capability; the doc comments on
+                     OpenProjectAsync and OpenProjectByNameAsync say which. -->
+                <Button x:Name="ProjectButton"
+                        Style="{StaticResource ToolbarOutlinedButtonStyle}"
+                        Content="Project &#x25BE;"
+                        AutomationProperties.AutomationId="Toolbar.ProjectButton"
+                        AutomationProperties.Name="Project"
+                        ToolTipService.ToolTip="New, open and save projects">
+                    <Button.Flyout>
+                        <MenuFlyout x:Name="ProjectFlyout" Opening="OnProjectFlyoutOpening">
+                            <MenuFlyoutItem x:Name="ProjectNewItem"
+                                            Text="New Project…"
+                                            Click="OnProjectNewClick"
+                                            AutomationProperties.AutomationId="Toolbar.Project.New"
+                                            AutomationProperties.Name="New project"
+                                            ToolTipService.ToolTip="New project (Ctrl+N)" />
+                            <MenuFlyoutItem x:Name="ProjectOpenItem"
+                                            Text="Open…"
+                                            Click="OnProjectOpenClick"
+                                            AutomationProperties.AutomationId="Toolbar.Project.Open"
+                                            AutomationProperties.Name="Open a project file"
+                                            ToolTipService.ToolTip="Open a .rud from anywhere (Ctrl+O)" />
+                            <!-- Filled at MenuFlyout.Opening from a REAL directory scan
+                                 (rudis_get_projects), never from a cached list and never
+                                 from a stub - CLAUDE.md rule 1. Empty in markup on
+                                 purpose: anything listed here would be a fiction. -->
+                            <MenuFlyoutSubItem x:Name="ProjectRecentItem"
+                                               Text="Open Recent"
+                                               AutomationProperties.AutomationId="Toolbar.Project.Recent"
+                                               AutomationProperties.Name="Open recent project" />
+
+                            <MenuFlyoutSeparator />
+
+                            <!-- No picker and no dialog on Save, deliberately: plan
+                                 60.1-02's backend MINTS an Untitled project when none
+                                 is active, so Save always has somewhere to go and a
+                                 beginner never meets a modal between their work and
+                                 safety. -->
+                            <MenuFlyoutItem x:Name="ProjectSaveItem"
+                                            Text="Save"
+                                            Click="OnProjectSaveClick"
+                                            AutomationProperties.AutomationId="Toolbar.Project.Save"
+                                            AutomationProperties.Name="Save the project"
+                                            ToolTipService.ToolTip="Save (Ctrl+S)" />
+                            <MenuFlyoutItem x:Name="ProjectSaveAsItem"
+                                            Text="Save As…"
+                                            Click="OnProjectSaveAsClick"
+                                            AutomationProperties.AutomationId="Toolbar.Project.SaveAs"
+                                            AutomationProperties.Name="Save the project to a chosen file"
+                                            ToolTipService.ToolTip="Save the project to a file you choose" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+
+                <Button x:Name="ImportButton"
+                        Style="{StaticResource ToolbarOutlinedButtonStyle}"
+                        Content="&#xFF0B; Import"
+                        Click="OnImportClick"
+                        AutomationProperties.AutomationId="Toolbar.ImportButton"
+                        AutomationProperties.Name="Import media"
+                        ToolTipService.ToolTip="Import media (Ctrl+I)" />
+
+                <StackPanel x:Name="UndoRedoInline"
+                            Orientation="Horizontal"
+                            Spacing="{StaticResource gap-toolbar}"
+                            VerticalAlignment="Center">
+                    <Button x:Name="UndoButton"
+                            Style="{StaticResource ToolbarGlyphButtonStyle}"
+                            Content="&#x21B6;"
+                            Click="OnUndoClick"
+                            AutomationProperties.AutomationId="Toolbar.UndoButton"
+                            AutomationProperties.Name="Undo"
+                            ToolTipService.ToolTip="Undo (Ctrl+Z)" />
+                    <Button x:Name="RedoButton"
+                            Style="{StaticResource ToolbarGlyphButtonStyle}"
+                            Content="&#x21B7;"
+                            Click="OnRedoClick"
+                            AutomationProperties.AutomationId="Toolbar.RedoButton"
+                            AutomationProperties.Name="Redo"
+                            ToolTipService.ToolTip="Redo (Ctrl+Y)" />
+                </StackPanel>
+
+                <Button x:Name="OverflowButton"
+                        Style="{StaticResource ToolbarGlyphButtonStyle}"
+                        Content="&#x22EF;"
+                        Visibility="Collapsed"
+                        AutomationProperties.AutomationId="Toolbar.OverflowButton"
+                        AutomationProperties.Name="More actions"
+                        ToolTipService.ToolTip="More actions">
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem x:Name="OverflowUndoItem"
+                                            Text="Undo"
+                                            Click="OnUndoClick"
+                                            AutomationProperties.AutomationId="Toolbar.OverflowUndo"
+                                            AutomationProperties.Name="Undo" />
+                            <MenuFlyoutItem x:Name="OverflowRedoItem"
+                                            Text="Redo"
+                                            Click="OnRedoClick"
+                                            AutomationProperties.AutomationId="Toolbar.OverflowRedo"
+                                            AutomationProperties.Name="Redo" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+            </StackPanel>
+
+            <!-- CENTER: the segmented workspace-mode switch. NO backend (UI-SPEC §3). -->
+            <Border x:Name="ModeTabs"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="{StaticResource bg-elevated}"
+                    CornerRadius="{StaticResource radius-control}"
+                    Padding="2"
+                    TabFocusNavigation="Once"
+                    AutomationProperties.AutomationId="Toolbar.ModeTabs"
+                    AutomationProperties.Name="Workspace mode">
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                    <RadioButton x:Name="EditTab"
+                                 Style="{StaticResource ModeSegmentStyle}"
+                                 GroupName="ToolbarModeTabs"
+                                 Content="Edit"
+                                 IsChecked="True"
+                                 Checked="OnModeTabChecked"
+                                 AutomationProperties.AutomationId="Toolbar.ModeTabs.Edit"
+                                 AutomationProperties.Name="Edit" />
+                    <RadioButton x:Name="ColorTab"
+                                 Style="{StaticResource ModeSegmentStyle}"
+                                 GroupName="ToolbarModeTabs"
+                                 Content="Color"
+                                 Checked="OnModeTabChecked"
+                                 AutomationProperties.AutomationId="Toolbar.ModeTabs.Color"
+                                 AutomationProperties.Name="Color" />
+                </StackPanel>
+            </Border>
+
+            <!-- RIGHT: export. The busy fill lives in the CONTENT (not the template)
+                 so its width can be driven from the mirror's export:progress. -->
+            <Button x:Name="ExportButton"
+                    Style="{StaticResource ToolbarAccentButtonStyle}"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    IsEnabled="False"
+                    Click="OnExportClick"
+                    AutomationProperties.AutomationId="Toolbar.ExportButton"
+                    AutomationProperties.Name="Export"
+                    ToolTipService.ToolTip="Export the timeline to a real file (Ctrl+E)">
+                <Border CornerRadius="{StaticResource radius-control}">
+                    <Grid>
+                        <Border x:Name="ExportBusyFill"
+                                Background="{StaticResource accent-bright}"
+                                HorizontalAlignment="Left"
+                                Width="0" />
+                        <TextBlock x:Name="ExportLabel"
+                                   Text="Export &#x25BE;"
+                                   Foreground="{StaticResource on-accent}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+            </Button>
+        </Grid>
+    </Border>
+</UserControl>

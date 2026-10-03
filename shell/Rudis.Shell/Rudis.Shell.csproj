@@ -1,0 +1,198 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Rudis.Shell — THE PRODUCTION native C# shell, and the only shipping executable.
+    It links the Rust workspace through the Phase 47 C ABI (crates/ffi's rudis_ffi.dll).
+    The Tauri 2.x + WebView shell it was built alongside was RETIRED at Phase 55
+    (GATE-07, plan 55-10), which deleted src-tauri/ and the TypeScript frontend/.
+
+    History: created by Phase 50, plan 50-03 (SHELL-01/SC-1) as the repo's first
+    shipped-shape .csproj — a second, then-unshipped executable that ran in parallel
+    while the Tauri shell kept shipping untouched (D-15) until that Phase 55 cutover.
+
+    Property set PROMOTED from the proven spike (spikes/44-hwaccel/csharp-host/
+    SpikeHost.csproj:21-45 — hand-written and `dotnet build`-able because this machine
+    has VS Build Tools only, no WinUI project templates). Do not re-derive these values.
+
+    Version locks (carried from the spike; RESEARCH §0):
+      * Microsoft.WindowsAppSDK 1.8.*  — NEVER the next major line, which targets
+        .NET 10. The `1.8.*` float excludes prereleases by NuGet rules, so a -preview
+        cannot be selected by accident.
+      * .NET 9 — matches the repo-root global.json pin (9.0.316, rollForward
+        latestFeature; plan 50-02).
+      * Windows SDK 10.0.26100.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>Rudis.Shell</RootNamespace>
+    <AssemblyName>Rudis.Shell</AssemblyName>
+    <!-- Phase 70 (OSS-05, D-70-10c): a from-source build identifies itself. The SDK stamps ProductVersion as <Version>+<git sha>; scripts/release/build-release.ps1 -p:Version= still overrides this at release time. -->
+    <Version>10.0.0</Version>
+    <!-- Phase 68 (OSS-04): licence metadata; the text is LICENSE (verbatim FSF AGPL-3.0), notices in NOTICE.md. -->
+    <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
+    <Copyright>Copyright (C) 2026 The Rudis Authors</Copyright>
+    <Platforms>x64</Platforms>
+    <!-- A bare `dotnet build` passes no Platform, so MSBuild defaults it to AnyCPU
+         and drops the x64 segment from the output path. This project is x64-only
+         (Platforms above); defaulting here makes CLI builds land in bin\x64\... the
+         same as IDE builds. A CLI-passed -p:Platform=x64 is a global property and
+         still wins. -->
+    <Platform Condition="'$(Platform)' == 'AnyCPU'">x64</Platform>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <!-- Unpackaged (D-02): no MSIX identity, launched straight off disk. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <!-- WinAppSDK runtime carried beside the exe — required when unpackaged, otherwise
+         the app depends on a machine-wide Windows App SDK runtime install. -->
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <!-- .NET runtime carried beside the exe. The spike used `false` as a dev-box
+         optimisation (Microsoft.WindowsDesktop.App 9.0.18 is installed there); SHELL-08
+         requires first-run on a clean Windows machine with nothing pre-installed, which
+         `false` cannot satisfy (RESEARCH §1a — two independent axes; do not conflate
+         this with WindowsAppSDKSelfContained above). -->
+    <SelfContained>true</SelfContained>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The exe's own Win32 RT_GROUP_ICON (quick task 260821-xax). Unpackaged apps have no
+         MSIX manifest to declare a logo, so this resource is the ONLY thing Explorer, the
+         taskbar, Alt-Tab and a Desktop shortcut have to draw. Committed rather than
+         generated at build time; scripts/windows/make-app-icon.ps1 regenerates it and is
+         the readable source of the mark. -->
+    <ApplicationIcon>Assets\Rudis.ico</ApplicationIcon>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <!-- WinUI's own generated code trips the platform-compat analyzer. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- Committed, diffable lock file (RESEARCH §7) — the same rationale as the
+         committed cbindgen header: the resolved dependency set is reviewable. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Phase 62, plan 62-02 (SHIP-02/SHIP-03). Velopack's install/update hooks run
+         INSIDE the process and may exit it (the `veloapp-install` / `veloapp-updated`
+         argv switches), so `VelopackApp.Build().Run()` has to be the FIRST statement of
+         Main — before WinRT COM init, before Application.Start. The XAML compiler's
+         GENERATED Main (obj/…/App.g.i.cs) offers no seam in front of itself, so this
+         constant switches it off and Program.cs replicates it verbatim with the
+         Velopack line in front. D-02 is untouched: still WindowsPackageType=None,
+         still SelfContained — Velopack WRAPS this publish output rather than
+         repackaging it (research/v9/STACK.md Q5 rejects MSIX for exactly that
+         reason). -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.*" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.*" />
+    <!-- Velopack (MIT) — the installer + update client, PROVENANCE.md Entry 38.
+         Pinned exactly, not floated: an updater is a remote-code-execution path by
+         design (T-62-06), so the version that ships is the version that was reviewed.
+         The resolved graph is visible in packages.lock.json beside this file. -->
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+  <!-- The update feed URL, baked in at COMPILE TIME and nowhere else (T-62-06).
+       Deliberately NOT an environment variable and NOT a config file beside the exe:
+       both are writable by anything running as the user, and a redirectable feed URL
+       is a redirectable code-download. Absent (the default, and the default for every
+       `dotnet build` a developer runs) the updater does ZERO work and attempts no
+       connection — CLAUDE.md rule 5's offline core is the shipped posture until the
+       owner has a real HTTPS endpoint. scripts/release/build-release.ps1 passes
+       -p:RudisUpdateFeed=… for a real release. -->
+  <ItemGroup Condition="'$(RudisUpdateFeed)' != ''">
+    <AssemblyMetadata Include="RudisUpdateFeed" Value="$(RudisUpdateFeed)" />
+  </ItemGroup>
+
+  <!-- Native-resource staging source for the imported .targets below (its designed
+       override seam — Rudis.Ffi.targets:15-16). Since 48-03 (commit 8784e857,
+       hwdecode DEFAULT ON), rudis_ffi.dll carries LOAD-TIME PE imports of
+       avcodec-62/avformat-62/avutil-60: the DLL cannot load beside this exe without
+       that runtime staged next to it, regardless of which exports are called
+       (50-02-unknowns.md §3.3 — the exact repair the Phase 47 harness needed).
+       crates/engine/build.rs stages this same payload into the cargo target dir for
+       Rust callers; this is the managed-side equivalent. Populated by
+       scripts/windows/fetch-ffmpeg-devlibs.ps1 — the same prerequisite
+       `cargo build -p ffi` already has. NOTE: this is the ffmpeg-dev 62/60 payload;
+       the SIDECAR payload (runtime\binaries, 63/61 line) is a DIFFERENT set and is
+       staged on PUBLISH by Rudis.Ffi.targets' StageRustFfiPublish — do not conflate
+       the two. -->
+  <PropertyGroup>
+    <RustFfiResourcesDir>$(MSBuildThisFileDirectory)..\..\crates\engine\ffmpeg-dev\bin</RustFfiResourcesDir>
+  </PropertyGroup>
+
+  <!-- The PROVEN staging file, imported not rewritten (Phase 47 D-14): BuildRustFfi
+       (the always-invoked release cargo build of the ffi package — FFI-05's
+       structural freshness) + StageRustFfi (rudis_ffi.dll and the native-resources
+       glob into $(OutDir)). -->
+  <Import Project="..\..\crates\ffi\Rudis.Ffi.targets" />
+
+  <!-- The Timeline renderer's own native artifact (Phase 52, plan 52-01):
+       BuildRustTimeline (the always-invoked release cargo build of
+       crates/timeline-render, which is DELIBERATELY its own workspace until
+       plan 52-04 promotes it) + StageRustTimeline (rudis_timeline.dll into
+       $(OutDir)).
+
+       A SECOND cdylib beside rudis_ffi.dll, on purpose: crates/timeline-render
+       pins its own wgpu major, and two majors in one process must never share
+       a symbol table. Deliberately NOT imported by Rudis.Shell.Tests.csproj —
+       the managed test tier never loads the renderer. -->
+  <Import Project="..\..\crates\timeline-render\Rudis.Timeline.targets" />
+
+  <!-- The app's OWN compiled XAML into $(PublishDir) (Phase 55, plan 55-09) — the
+       third and last class of 50-09-PACKAGING.md §3.1's missing set, and the one that
+       surprised that plan most, because it is not FFI-related at all.
+
+       §3.2's measured diagnosis: for a WindowsPackageType=None (unpackaged) WinUI 3
+       project on this SDK/toolchain combination (net9.0-windows10.0.26100.0 +
+       WinAppSDK 1.8.*), the SDK's own publish targets do not carry the XAML
+       compiler's per-page .xbf output or the project's resource index
+       (Rudis.Shell.pri) into the publish output. §3.6 named two candidate mechanisms
+       and decided neither; this takes the second one ("an AfterTargets=Publish copy
+       target mirroring StageRustFfi") because the first — <None
+       CopyToPublishDirectory="..."/> — cannot work here: these files do not exist at
+       project-evaluation time, the XAML compiler emits them during the build.
+
+       Measured on this tree at plan 55-09's base: 16 files, and they are NOT all at
+       the top level — Dialogs\, Regions\ and Theme\ each carry their own .xbf, so
+       %(RecursiveDir) is load-bearing and a flat copy would silently mis-place 13 of
+       the 15. Without them the process dies before any managed exception handler
+       runs; 50-09 §3.3 measured ExitCode -1073741189 and no window.
+
+       Sourced from $(OutDir) deliberately: `dotnet publish` builds first, so the
+       XAML compiler has already run and its output is authoritative there. -->
+  <Target Name="StageWinUiXamlPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <PropertyGroup>
+      <_RudisXamlPublishDir Condition="!HasTrailingSlash('$(PublishDir)')">$(PublishDir)\</_RudisXamlPublishDir>
+      <_RudisXamlPublishDir Condition="HasTrailingSlash('$(PublishDir)')">$(PublishDir)</_RudisXamlPublishDir>
+    </PropertyGroup>
+    <!-- ⚠ The Exclude is load-bearing, and its absence was a REAL BUG measured by
+         plan 62-02 the first time anything published this project TWICE.
+
+         $(PublishDir) sits INSIDE $(OutDir) (…\win-x64\publish\ under …\win-x64\),
+         so on a second publish the recursive glob above matched the .xbf files this
+         very target staged on the first one — and %(RecursiveDir) then faithfully
+         reproduced them one level deeper, at publish\publish\. Measured: 17 .xbf on
+         publish #1, 34 on publish #2, with a publish\publish\ subtree carrying
+         App.xbf, Dialogs\, Regions\ and Theme\. A third publish would have made
+         publish\publish\publish\, and the installer built from that tree ships every
+         copy.
+
+         Nothing legitimately produces compiled XAML inside the publish directory, so
+         excluding it cannot hide a real artifact. Invisible until a release pipeline
+         existed to run the target more than once against the same $(OutDir), which is
+         exactly what 62-02 built. -->
+    <ItemGroup>
+      <RudisXamlPublishArtifact Include="$(OutDir)**\*.xbf" Exclude="$(_RudisXamlPublishDir)**\*.xbf" />
+      <RudisXamlPublishArtifact Include="$(OutDir)$(AssemblyName).pri" />
+    </ItemGroup>
+    <Error Condition="'@(RudisXamlPublishArtifact)' == ''"
+           Text="StageWinUiXamlPublish found no .xbf/.pri under $(OutDir). A published WinUI 3 app without its compiled XAML does not launch (50-09-PACKAGING.md §3.3) — failing loudly beats shipping a payload that dies on start." />
+    <Copy SourceFiles="@(RudisXamlPublishArtifact)"
+          DestinationFiles="@(RudisXamlPublishArtifact->'$(_RudisXamlPublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="StageWinUiXamlPublish -> $(_RudisXamlPublishDir) (@(RudisXamlPublishArtifact->Count()) compiled-XAML file(s))" />
+  </Target>
+
+</Project>

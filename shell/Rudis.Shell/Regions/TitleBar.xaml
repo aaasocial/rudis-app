@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Rudis.Shell.Regions.TitleBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Height="{StaticResource height-TitleBar}"
+    FontFamily="Calibri">
+
+    <!--
+      TitleBar — the region name is the handoff's, character-for-character
+      (design_handoff_rudis_editor/README.md:29,81; CLAUDE.md rule 7).
+
+      EVERY colour and metric below is a {StaticResource} token key from
+      Theme/Tokens.xaml. A raw-hex literal in this file is a build FAILURE
+      (shell/Rudis.Shell.Tests/MechanicalGatesTests.cs, plan 50-07) — including
+      the 8-digit #AARRGGBB form.
+
+      Layout (UI-SPEC §2 / handoff:51,83): fixed 40px, full width. Left to right:
+      app glyph [R] on `accent`, app name "Rudis" on `text-primary`, the project
+      filename, then the window controls right-aligned at >=46px hit width each.
+      The app-menu glyph is PRESENT since Phase 69 (OSS-01, D-69-10): the handoff
+      allows it (README:86 "(optional) click app glyph for the app menu"), and its one
+      item, Settings…, is the TitleBar's entry to the key surface. The glyph is now a
+      Button (TitleBar.AppMenu) - the one interactive element inside BrandBlock - so
+      the drag rectangle starts to the RIGHT of it (TitleBar.xaml.cs UpdateDragRegion).
+
+      Drag mechanics are PROVEN, not cited — see TitleBar.xaml.cs's
+      AttachToWindow remarks and artifacts/50-05-regions.md.
+
+      Caption glyphs use {ThemeResource SymbolThemeFontFamily} rather than a
+      hard-coded icon family. MEASURED 2026-07-30 on Windows 10 19045, which does
+      NOT ship Segoe Fluent Icons (only segmdl2.ttf is present in C:\Windows\Fonts):
+      the theme resource still resolves to a font that carries the Chrome* glyphs,
+      so E921/E922/E923/E8BB render. A later glyph-heavy region (50-06's Transport)
+      can rely on this resource instead of pinning a family per OS version.
+    -->
+
+    <UserControl.Resources>
+
+        <!-- The app menu's flyout, tokenised: the stock MenuFlyout reads these keys, and
+             leaving them unaliased would paint it from WinUI system brushes (raw hex by
+             proxy). Scoped to this region, like Chat.xaml's input-chrome retarget. -->
+        <StaticResource x:Key="MenuFlyoutPresenterBackground" ResourceKey="bg-panel" />
+        <StaticResource x:Key="MenuFlyoutPresenterBorderBrush" ResourceKey="border-hairline" />
+        <StaticResource x:Key="MenuFlyoutItemForeground" ResourceKey="text-primary" />
+
+        <!--
+          The three window controls. Explicit ControlTemplate rather than theme-
+          resource overrides so every state colour is a named token and nothing
+          inherits a WinUI system brush (which would be raw-hex by proxy).
+
+          Hover/pressed are UI-SPEC §1 GAPS: the handoff defines no per-control
+          hover fill and no "close turns red" token. Resolved as `bg-elevated`
+          (hover) / `bg-segment-active` (pressed) per UI-SPEC gap 2's flat-control
+          recommendation, and the close button is deliberately NOT red — there is
+          no red token in the handoff and inventing a hex would violate rule 7.
+          Recorded in artifacts/50-05-regions.md rather than silently chosen.
+
+          Focus ring: `accent-bright` (UI-SPEC gap 3's recorded resolution).
+        -->
+        <Style x:Key="TitleBarCaptionButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="{StaticResource width-window-control}" />
+            <Setter Property="Height" Value="{StaticResource height-TitleBar}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+            <!-- UI-SPEC §5: TitleBar controls are NOT in the tab order (OS
+                 convention). UIA can still Invoke them — Invoke needs no focus —
+                 so SHELL-07 loses nothing. -->
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="CaptionFill" Background="{TemplateBinding Background}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="CaptionFill.Background" Value="{StaticResource bg-elevated}" />
+                                            <Setter Target="CaptionGlyph.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="CaptionFill.Background" Value="{StaticResource bg-segment-active}" />
+                                            <Setter Target="CaptionGlyph.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="CaptionGlyph.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="CaptionGlyph"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontFamily="{TemplateBinding FontFamily}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <Grid x:Name="TitleBarRoot" Background="{StaticResource bg-window}">
+        <Grid.ColumnDefinitions>
+            <!-- Brand + project name. Display-only EXCEPT the app-menu button
+                 (Phase 69), which the drag rectangle excludes by starting right of it. -->
+            <ColumnDefinition Width="Auto" />
+            <!-- The empty stretch: the rest of the drag region. -->
+            <ColumnDefinition Width="*" />
+            <!-- The window controls: EXCLUDED from the drag rectangles, which is
+                 the classic bug UI-SPEC §2 names. Measured, not assumed — see
+                 TitleBar.xaml.cs. -->
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel x:Name="BrandBlock"
+                    Grid.Column="0"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    Margin="12,0,0,0"
+                    VerticalAlignment="Center"
+                    Background="Transparent"
+                    DoubleTapped="OnDragAreaDoubleTapped">
+            <!-- The app glyph, now the app menu (Phase 69, D-69-10). The caption style's
+                 template binds Foreground, so `accent` at rest is kept; hover/pressed
+                 use the caption states' tokens. IsDoubleTapEnabled=False so a quick
+                 double click opens the menu rather than also maximizing via BrandBlock. -->
+            <Button x:Name="AppMenuButton"
+                    Content="[R]"
+                    Style="{StaticResource TitleBarCaptionButtonStyle}"
+                    Foreground="{StaticResource accent}"
+                    FontFamily="Calibri"
+                    Width="28"
+                    Height="24"
+                    Padding="0"
+                    FontSize="13"
+                    FontWeight="SemiBold"
+                    IsDoubleTapEnabled="False"
+                    AutomationProperties.AutomationId="TitleBar.AppMenu"
+                    AutomationProperties.Name="App menu"
+                    ToolTipService.ToolTip="App menu (Settings…)">
+                <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                        <MenuFlyoutItem x:Name="AppMenuSettings"
+                                        Text="Settings…"
+                                        Click="OnSettingsClick"
+                                        KeyboardAcceleratorTextOverride="Ctrl+,"
+                                        AutomationProperties.AutomationId="TitleBar.AppMenu.Settings"
+                                        AutomationProperties.Name="Settings…" />
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
+            <TextBlock x:Name="AppNameText"
+                       Text="Rudis"
+                       Foreground="{StaticResource text-primary}"
+                       FontSize="13"
+                       FontWeight="SemiBold" />
+            <!-- Mirror-driven, read-only (CLAUDE.md rule 4). Text is set by
+                 SetProject() from ShellMirror's project state; this control owns
+                 no truth. Live region so UIA announces a project switch. -->
+            <TextBlock x:Name="ProjectNameText"
+                       Text="— No project"
+                       Foreground="{StaticResource text-primary}"
+                       FontSize="13"
+                       FontWeight="Normal"
+                       TextTrimming="CharacterEllipsis"
+                       AutomationProperties.AutomationId="TitleBar.ProjectName"
+                       AutomationProperties.Name="Project name"
+                       AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+
+        <!-- Transparent, hit-testable filler. Transparent (not null) so
+             DoubleTapped reaches it in the fallback path. -->
+        <Border x:Name="DragFiller"
+                Grid.Column="1"
+                Background="Transparent"
+                DoubleTapped="OnDragAreaDoubleTapped" />
+
+        <StackPanel x:Name="WindowControls"
+                    Grid.Column="2"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Top">
+            <Button x:Name="MinimizeButton"
+                    Style="{StaticResource TitleBarCaptionButtonStyle}"
+                    Content="&#xE921;"
+                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                    Click="OnMinimizeClick"
+                    AutomationProperties.AutomationId="TitleBar.Minimize"
+                    AutomationProperties.Name="Minimize"
+                    ToolTipService.ToolTip="Minimize" />
+            <Button x:Name="MaximizeButton"
+                    Style="{StaticResource TitleBarCaptionButtonStyle}"
+                    Content="&#xE922;"
+                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                    Click="OnMaximizeClick"
+                    AutomationProperties.AutomationId="TitleBar.Maximize"
+                    AutomationProperties.Name="Maximize"
+                    ToolTipService.ToolTip="Maximize" />
+            <Button x:Name="CloseButton"
+                    Style="{StaticResource TitleBarCaptionButtonStyle}"
+                    Content="&#xE8BB;"
+                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                    Click="OnCloseClick"
+                    AutomationProperties.AutomationId="TitleBar.Close"
+                    AutomationProperties.Name="Close"
+                    ToolTipService.ToolTip="Close" />
+        </StackPanel>
+    </Grid>
+</UserControl>

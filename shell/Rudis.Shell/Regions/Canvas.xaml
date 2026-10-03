@@ -1,0 +1,436 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Rudis.Shell.Regions.Canvas"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:regions="using:Rudis.Shell.Regions"
+    FontFamily="Calibri">
+
+    <!--
+      Canvas — the region name is the handoff's, character-for-character
+      (design_handoff_rudis_editor/README.md:33,96; CLAUDE.md rule 7 / D-19), and so
+      are the five tool AutomationIds (README:41:
+      `Canvas.ToolPalette.Pointer|Pen|Lasso|Text|Shape`).
+
+      EVERY colour is a {StaticResource} token key from Theme/Tokens.xaml. A raw-hex
+      literal here is a build FAILURE (MechanicalGatesTests.
+      no_raw_hex_outside_the_token_dictionary, which enumerates shell/Rudis.Shell/**
+      for .cs and .xaml).
+
+      ═══ WHAT THIS REGION DOES, AND WHERE ═══
+
+      TWO real ink surfaces, driven by ONE tool palette:
+
+        · Canvas › ToolPalette drives DRAWING OVER THE PREVIEW through
+          PreviewInkLayer, an ordinary transparent XAML sibling above the Preview
+          region's SwapChainPanel (D-11). MainWindow wires ToolChanged ->
+          PreviewRegion.Ink.SelectedTool. Those marks carry `space: "frame_linked"`
+          and the ENGINE composites them onto the video.
+
+        · The dotted-grid STAGE below is now the SECOND ink surface (plan 60.2-02,
+          which RETIRES the Phase 51 scope note this paragraph used to carry). A
+          drag on it with a draw tool selected becomes a REAL undoable
+          `AddAnnotation` carrying `space: "whiteboard"` — dispatched through the
+          same generic builder the Preview uses, with ZERO video loaded and ZERO
+          composite ever having happened. Committed whiteboard marks are re-drawn
+          here FROM THE MIRROR, so an Undo visibly removes one and a Redo restores
+          it, with no stage-local retained state (CLAUDE.md rule 4). They NEVER
+          composite into the Preview (T-51-13) — the engine draws `frame_linked`
+          only — which is precisely why this region has to draw its own committed
+          layer: it is the stage's half of D-13's trail hand-off.
+
+      ═══ THE TWO BOUNDARIES THAT REMAIN, RECORDED RATHER THAN SMUGGLED ═══
+      (repeated in Canvas.xaml.cs's class doc and in plan 60.2-02's SUMMARY)
+
+      (1) The zoom chip stays an EXPLICITLY-LABELLED INERT PLACEHOLDER — see its own
+          comment further down, which is unchanged. Canvas pan/zoom was offered to
+          the owner on 2026-08-27 and DECLINED; there is no viewport transform
+          anywhere in this region, and the stage box is simply the region's own
+          bounds.
+
+      (2) The agent's whiteboard raster is sized from the PREVIEW's aspect ratio
+          (`whiteboard_raster_dims` in crates/ffi/src/ctx.rs), not from this stage's.
+          Stage marks therefore reach the agent positionally correct in normalized
+          space but ANISOTROPICALLY STRETCHED wherever the two aspects differ. That
+          is an ACCEPTED, RECORDED limitation of Phase 60.2 (deferred-items D-1), not
+          an oversight.
+    -->
+
+    <UserControl.Resources>
+
+        <!-- ═══ One tile of Canvas › ToolPalette ═══
+             Handoff *Tool-active* state (README:104): "active tool tile uses `accent`
+             fill (others `text-secondary`)". Hover/disabled follow the same UI-SPEC
+             gap resolutions Toolbar.xaml records for its own segmented control. -->
+        <Style x:Key="CanvasToolStyle" TargetType="RadioButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource text-secondary}" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource accent-bright}" />
+            <Setter Property="FocusVisualSecondaryBrush" Value="{StaticResource on-accent}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{StaticResource radius-control}"
+                                Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Glyph.Foreground" Value="{StaticResource text-primary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed" />
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Glyph.Foreground" Value="{StaticResource text-tertiary}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualState x:Name="Unchecked" />
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource accent}" />
+                                            <Setter Target="Glyph.Foreground" Value="{StaticResource on-accent}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Indeterminate" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="Glyph"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <!-- Stage input lands HERE, on the region root itself, and the handlers are
+         wired in MARKUP so the region's input surface is visible where a reader
+         looks first. `bg-app` is a real brush covering the whole region, which is
+         what makes the root hit-testable at all (a null Brush is not). The tool
+         palette and the zoom chip are declared AFTER the ink host below, so they
+         stay above it and keep their own input; a RadioButton marks its pointer
+         events handled, so a palette click never starts a stage gesture. -->
+    <Grid x:Name="CanvasRoot"
+          Background="{StaticResource bg-app}"
+          SizeChanged="OnCanvasSizeChanged"
+          PointerPressed="OnStagePointerPressed"
+          PointerMoved="OnStagePointerMoved"
+          PointerReleased="OnStagePointerReleased"
+          PointerCaptureLost="OnStagePointerCaptureLost"
+          PointerCanceled="OnStagePointerCaptureLost"
+          AutomationProperties.AutomationId="Canvas.Root"
+          AutomationProperties.Name="Canvas">
+
+        <!-- The dotted-grid stage (README:96). Ordinary geometry on `border-hairline`
+             — WinUI 3 has no tiling brush, so the dots are built once per size change
+             in code-behind (a cold path: nothing here runs per frame). -->
+        <Path x:Name="DotGrid"
+              Fill="{StaticResource border-hairline}"
+              IsHitTestVisible="False" />
+
+        <!-- ═══ The stage's POINTER AFFORDANCE (D-60.2-12) ═══
+
+             A full-bleed, otherwise-empty layer whose ONLY job is to carry a cursor:
+             a crosshair while a draw tool is selected, nothing (i.e. the inherited
+             default arrow) with `Pointer`. Canvas.xaml.cs's ApplyStageCursor decides,
+             through InkCursorGate.WantsInkCursor — the same predicate PreviewInkLayer
+             asks, so the two ink surfaces stay ONE product feature.
+
+             It exists because the owner ran 60.2-HUMAN-UAT check 1 on a build whose
+             stroke fidelity he PASSED and answered "still looks inert", reproducing
+             his original "I can't draw on the canvas section" report: the stage was
+             fully drawable and gave the pointer no cue at all, so the first feedback
+             arrived only after he had already committed to a drag.
+
+             THREE LOAD-BEARING FACTS, all of which a later edit can silently break:
+
+             (i)   `Background="Transparent"` IS REQUIRED. A Grid with a null Brush
+                   renders nothing and is not hit-testable, and an element that can
+                   never BE the hit-test target can never contribute a cursor —
+                   WinUI resolves the cursor by walking UP from the target. Same
+                   lesson StageInkHost's comment records for its UIA rect, different
+                   consequence.
+
+             (ii)  IT MUST STAY DECLARED BELOW THE CHROME. The ToolPalette and the
+                   zoom chip are declared LAST on purpose, so they sit above this
+                   layer and take their own hits; their ancestor chain then carries
+                   NO cursor anywhere and the arrow shows over them (true even of the
+                   DISABLED chip — measured, see its own comment below).
+                   Moving this element after them, or putting the cursor on
+                   `CanvasRoot`/the UserControl instead, reintroduces exactly the
+                   crosshair-over-the-toolbar defect this layer exists to avoid.
+                   (`InkCursorWiringGateTests` pins that rule; `CanvasCursorUiaTests`
+                   MEASURES it on the running shell.)
+
+                   ⚠ AND Z-ORDER ALONE IS NOT THE WHOLE RULE (review WR-01). It
+                   decides the CURSOR; it does NOT decide what a PRESS does, because
+                   PointerPressed still bubbles from any chrome that does not mark it
+                   handled and CanvasRoot's handler is wired for the whole region. So
+                   THE CURSOR AND THE PRESS MUST BE DECIDED TOGETHER, PER ELEMENT, and
+                   must agree — see OnChromePointerPressed in Canvas.xaml.cs for the
+                   principle and each element below for its one-line justification.
+
+             (iii) ITS POINTER EVENTS BUBBLE to CanvasRoot's markup-wired handlers —
+                   which is the existing input design, unchanged. This layer marks
+                   nothing handled and has no handlers of its own; `GetCurrentPoint`/
+                   `GetIntermediatePoints` are taken relative to `CanvasRoot`
+                   regardless of the hit-test target, nothing in Canvas.xaml.cs reads
+                   `OriginalSource`, and capture stays on `CanvasRoot`.
+
+             Deliberately NO AutomationProperties: this is not a contract surface.
+             `Canvas.Stage` (StageInkHost) remains the UIA coordinate anchor, and is
+             byte-untouched by this change. -->
+        <regions:CursorHost x:Name="StageCursorLayer" Background="Transparent" />
+
+        <!-- ═══ The stage's ink host ═══
+
+             A DEDICATED AutomationId (on the host element below), rather than a
+             reuse of `Canvas.Root`, is the DECIDED answer to this phase's research
+             Open Question 2. The host is FULL-BLEED, so its UIA bounding rect IS
+             the exact box `CanvasStageGesture.NormalizeInBox` divides by: a test
+             that computes expected coordinates from the anchor's rect measures the
+             same box the code normalized against. Precedent for two ids on one
+             region: `Preview.Root` / `Preview.Surface`; and `Timeline.Root` proves
+             a plain Grid is findable by `FindFirstDescendant`.
+
+             ⚠ `Background="Transparent"` IS LOAD-BEARING, AND IT IS NOT ABOUT
+             INPUT. Plan 60.2-04 MEASURED what a Background-less host reports to UI
+             Automation on this machine: `IsOffscreen=True` and a bounding rectangle
+             of `{0,0,0,0}` — an anchor that is findable and useless, which silently
+             defeats the coordinate contract this element exists to provide. A Grid
+             with a null Brush renders nothing, and WinUI's automation peer answers
+             for what is RENDERED, not for what is laid out (`Canvas.Root` reports a
+             real rect for exactly one reason: it carries `bg-app`). `Transparent` is
+             a real brush, so the peer reports the real full-bleed rect
+             (measured: host `608x241` inside root `608x242`, a 1px peer rounding at
+             125% scale). Dropping `IsHitTestVisible="False"` was tried FIRST and
+             changed nothing — hit-testability is not what makes the peer offscreen —
+             so both attributes are needed and neither is redundant.
+
+             ⚠ IsHitTestVisible="False" on the host AND on every child. Input must
+             land on `CanvasRoot` itself (research Pattern 1): nothing beneath the
+             stage needs pass-through, so — unlike PreviewInkLayer — there is no
+             separate transparent sibling and no background toggling to gate the
+             tool. And the drawn ink must never eat the pointer that is drawing it,
+             which is the same rule PreviewInkLayer's LiveTrail states. This is also
+             what makes the transparent brush above FREE: an element excluded from
+             hit testing cannot intercept the pointer no matter what it is painted
+             with, so the stage's gesture path is byte-unchanged by it.
+
+             Declared AFTER `DotGrid` and BEFORE the chrome below: ink draws above
+             the dots and beneath the region tag, palette and zoom chip.
+
+             The ink styling — `accent`, 2px, dashed 4,3, round joins —
+             byte-matches PreviewInkLayer's LiveTrail, so the two surfaces read as
+             ONE product feature rather than two implementations. TOKENS ONLY: a raw
+             hex literal anywhere in this file, comments included, is a build FAILURE
+             (MechanicalGatesTests.no_raw_hex_outside_the_token_dictionary).
+
+             `Path.Data` is REPLACED per update, never a `Polyline` whose `Points`
+             collection is edited — plan 51-05's measured finding, restated on the
+             elements it governs. See Canvas.xaml.cs's RenderStageTrail. -->
+        <Grid x:Name="StageInkHost"
+              Background="Transparent"
+              IsHitTestVisible="False"
+              AutomationProperties.AutomationId="Canvas.Stage"
+              AutomationProperties.Name="Canvas stage">
+
+            <!-- Every COMMITTED whiteboard mark, in ONE geometry and ONE brush,
+                 rebuilt from the mirror per project:changed and per resize — a
+                 cold path, never a per-frame one. -->
+            <Path x:Name="CommittedInk"
+                  Stretch="None"
+                  Stroke="{StaticResource accent}"
+                  StrokeThickness="2"
+                  StrokeDashArray="4,3"
+                  StrokeLineJoin="Round"
+                  IsHitTestVisible="False" />
+
+            <!-- Committed `label` marks. A Grid with Margin placement, NOT a XAML
+                 `Canvas` panel: `Canvas` in this namespace is THIS region's own
+                 class, so the panel's name would collide. -->
+            <Grid x:Name="StageLabels" IsHitTestVisible="False" />
+
+            <!-- The in-progress trail, drawn above the committed layer and HELD
+                 after pointer-up until the mirror confirms (D-13). -->
+            <Path x:Name="StageLiveTrail"
+                  Stretch="None"
+                  Stroke="{StaticResource accent}"
+                  StrokeThickness="2"
+                  StrokeDashArray="4,3"
+                  StrokeLineJoin="Round"
+                  IsHitTestVisible="False" />
+        </Grid>
+
+        <!-- Region tag. Handoff typography for region tags: 10px / 800 /
+             letter-spacing .08em / `text-faint` (README:61-62). WinUI expresses
+             letter-spacing in 1/1000 em, so .08em = 80.
+
+             ⚠ IsHitTestVisible="False" IS THE CURSOR/PRESS DECISION FOR THIS ELEMENT
+             (review WR-01), not a tidy-up. THE JUSTIFICATION, in one line: the tag is
+             DECORATION — nobody aims at it — so it must not interrupt a stroke that
+             crosses it. Being transparent to input, the hit falls through to
+             StageCursorLayer, so the pointer shows the CROSSHAIR and the press draws:
+             both halves agree. Before this attribute the TextBlock took the hit (so
+             the pointer showed an ARROW, its ancestor chain carrying no cursor) while
+             the press still bubbled to CanvasRoot and started a real undoable
+             AddAnnotation — a cursor lying about what a click does, which is exactly
+             the mirror-image defect InkCursorGate's own doc names.
+
+             It does NOT hide the element from UI Automation: plan 60.2-04 MEASURED
+             that on StageInkHost (hit-testability is not what makes a peer offscreen;
+             a real Background is), and the tag's AutomationId is unchanged. -->
+        <TextBlock Text="CANVAS"
+                   Foreground="{StaticResource text-faint}"
+                   FontSize="10"
+                   FontWeight="ExtraBold"
+                   CharacterSpacing="80"
+                   Margin="16,12,0,0"
+                   HorizontalAlignment="Left"
+                   VerticalAlignment="Top"
+                   IsHitTestVisible="False"
+                   AutomationProperties.AutomationId="Canvas.RegionTag"
+                   AutomationProperties.Name="Canvas region" />
+
+        <!-- Canvas › ToolPalette — vertical, top-left (README:96).
+             RadioButtons in one group: single-selection semantics AND arrow-key
+             navigation for free, the same reasoning Toolbar.ModeTabs records.
+
+             ⚠ PointerPressed IS THE CURSOR/PRESS DECISION FOR THIS ELEMENT (review
+             WR-01). THE JUSTIFICATION, in one line: the palette is REAL CHROME the
+             user aims at, so it shows the arrow — and it must therefore swallow the
+             press, or the arrow is lying.
+
+             The five RadioButton tiles already do that themselves (ButtonBase marks
+             PointerPressed handled), which is why the one chrome reading the UIA test
+             used to take — at Canvas.ToolPalette.Pen's centre — was the single place
+             the claim cost nothing. THIS Border's own pixels are the ones that leaked:
+             its 1px frame, its Padding="2" and the Spacing="2" gaps between the tiles
+             belong to the Border and the StackPanel, neither of which handles a press,
+             so a click on the toolbar drew a stroke under an arrow cursor. The handler
+             sits on the Border because every one of those pixels hit-tests to it (the
+             StackPanel paints no Background and so is never the target), and because a
+             bubbling handler here also covers anything added inside it later. -->
+        <Border x:Name="ToolPalette"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Margin="16,36,0,0"
+                Background="{StaticResource bg-elevated}"
+                BorderBrush="{StaticResource border-hairline}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource radius-control}"
+                Padding="2"
+                TabFocusNavigation="Once"
+                PointerPressed="OnChromePointerPressed"
+                AutomationProperties.AutomationId="Canvas.ToolPalette"
+                AutomationProperties.Name="Canvas tool palette">
+            <StackPanel Orientation="Vertical" Spacing="2">
+                <RadioButton x:Name="PointerTool"
+                             Style="{StaticResource CanvasToolStyle}"
+                             GroupName="CanvasToolPalette"
+                             Content="&#x2316;"
+                             IsChecked="True"
+                             Checked="OnToolChecked"
+                             AutomationProperties.AutomationId="Canvas.ToolPalette.Pointer"
+                             AutomationProperties.Name="Pointer"
+                             ToolTipService.ToolTip="Pointer — the ink layer is inert; clicks reach the video" />
+                <RadioButton x:Name="PenTool"
+                             Style="{StaticResource CanvasToolStyle}"
+                             GroupName="CanvasToolPalette"
+                             Content="&#x270E;"
+                             Checked="OnToolChecked"
+                             AutomationProperties.AutomationId="Canvas.ToolPalette.Pen"
+                             AutomationProperties.Name="Pen"
+                             ToolTipService.ToolTip="Pen — draw a freehand stroke over the video" />
+                <RadioButton x:Name="LassoTool"
+                             Style="{StaticResource CanvasToolStyle}"
+                             GroupName="CanvasToolPalette"
+                             Content="&#x25CC;"
+                             Checked="OnToolChecked"
+                             AutomationProperties.AutomationId="Canvas.ToolPalette.Lasso"
+                             AutomationProperties.Name="Lasso"
+                             ToolTipService.ToolTip="Lasso — enclose a region of the video (needs at least 3 points)" />
+                <RadioButton x:Name="TextTool"
+                             Style="{StaticResource CanvasToolStyle}"
+                             GroupName="CanvasToolPalette"
+                             Content="T"
+                             Checked="OnToolChecked"
+                             AutomationProperties.AutomationId="Canvas.ToolPalette.Text"
+                             AutomationProperties.Name="Text"
+                             ToolTipService.ToolTip="Text — place a label on the video" />
+                <RadioButton x:Name="ShapeTool"
+                             Style="{StaticResource CanvasToolStyle}"
+                             GroupName="CanvasToolPalette"
+                             Content="&#x25AD;"
+                             Checked="OnToolChecked"
+                             AutomationProperties.AutomationId="Canvas.ToolPalette.Shape"
+                             AutomationProperties.Name="Shape"
+                             ToolTipService.ToolTip="Shape — drag an arrow from where you press to where you release" />
+            </StackPanel>
+        </Border>
+
+        <!-- The zoom chip (`− 100% +`, bottom-left — README:96).
+             DELIBERATELY INERT AND DISABLED. The handoff ships it in the empty state,
+             and CLAUDE.md rule 1 permits an explicitly-labelled placeholder where a
+             FAKE OPERATION is not — the same standard `Inspector.Placeholder` already
+             meets. Canvas pan/zoom is an infinite-surface feature with no backend
+             behind it in this milestone; a chip that changed a number without zooming
+             anything would be exactly the lie this project forbids.
+
+             ⚠ THIS ELEMENT'S CURSOR/PRESS DECISION IS "NOTHING NEEDED", AND THAT WAS
+             MEASURED RATHER THAN REASONED (review WR-01). WR-01 predicted that a
+             Control with IsEnabled="False" is excluded from WinUI hit testing, so the
+             pointer would fall straight THROUGH this chip to StageCursorLayer and show
+             the CROSSHAIR over it — and an enabled wrapper was written and shipped to
+             take the hit the disabled Button supposedly could not.
+
+             THE PREDICTION IS FALSE on WinAppSDK 1.8, and the wrapper was REVERTED
+             rather than kept as insurance. Measured by deleting it and re-running
+             CanvasCursorUiaTests.the_cursor_and_the_press_agree_on_every_canvas_element
+             against the bare chip: its centre reports IDC_ARROW (0x10003 — the same
+             handle the palette tiles report, NOT the stage's IDC_CROSS 0x10009), and a
+             full drag begun on it leaves Project.canvas.annotations EMPTY. A disabled
+             Button therefore DOES take the hit and DOES consume the press: the cursor
+             and the press already agree here, and no attribute can improve on that.
+
+             The reading is a permanent probe in that test now, asserted in both halves
+             like every other element — so if a future SDK does change how disabled
+             controls hit-test, it fails there instead of being rediscovered as a
+             mystery. The earlier claim in this file, in Canvas.xaml.cs and in
+             InkCursorWiringGateTests' failure message that "the arrow shows over the
+             zoom chip" turns out to have been RIGHT, for a reason nobody had checked. -->
+        <Button x:Name="ZoomChip"
+                IsEnabled="False"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                Margin="16,0,0,16"
+                Background="{StaticResource bg-elevated}"
+                BorderBrush="{StaticResource border-hairline}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource radius-control}"
+                Padding="10,4,10,4"
+                Content="&#x2212; 100% +"
+                Foreground="{StaticResource text-tertiary}"
+                FontSize="11"
+                AutomationProperties.AutomationId="Canvas.ZoomChip"
+                AutomationProperties.Name="Canvas zoom"
+                AutomationProperties.HelpText="Canvas pan/zoom is a deferred surface — this chip is inert"
+                ToolTipService.ToolTip="Canvas pan/zoom is deferred; this chip is inert" />
+    </Grid>
+</UserControl>

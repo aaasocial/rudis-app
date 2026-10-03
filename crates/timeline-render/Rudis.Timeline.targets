@@ -1,0 +1,74 @@
+<Project>
+  <!-- Rudis.Timeline.targets — the Timeline renderer's build + staging hook
+       (Phase 52; created by plan 52-01, retargeted to the workspace by 52-04).
+
+       This file MIRRORS crates/ffi/Rudis.Ffi.targets. It does not edit it and
+       does not replace it: Rudis.Ffi.targets is imported by the shell (and by
+       Phases 51/53/54 as they land), and rudis_timeline.dll is a SECOND,
+       independent native artifact — a different crate, a different wgpu major —
+       so it gets its own targets file rather than a widened shared one.
+
+       Freshness design, inherited verbatim from Rudis.Ffi.targets:2-13 —
+       ALWAYS invoke cargo and trust Cargo's own incrementality. An MSBuild
+       Inputs/Outputs glob reproducing Cargo's dependency graph is a drift risk
+       that cannot be right; `cargo build` with nothing changed returns in well
+       under a second and is the authoritative answer to "does this need
+       rebuilding".
+
+       52-04 CHANGED TWO THINGS, and only these two. Until 52-04 the crate was
+       its own workspace root, so this file had to pass an explicit manifest
+       path (a `cargo build -p timeline-render` from the repo root would not
+       have found the package at all) and read the artifact out of the crate's
+       own private target directory. The promotion into the root
+       [workspace].members makes both of those wrong, so the properties now
+       match Rudis.Ffi.targets' shape exactly: a workspace root plus a package
+       selector, and the SHARED target\release directory.
+
+       Two overridable properties, so a future importer needs zero edits here. -->
+  <PropertyGroup>
+    <RustTimelineWorkspaceRoot Condition="'$(RustTimelineWorkspaceRoot)' == ''">$(MSBuildThisFileDirectory)..\..</RustTimelineWorkspaceRoot>
+    <!-- CARGO_TARGET_DIR is part of the DEFAULT, mirroring Rudis.Ffi.targets' own
+         fix (plan 55-09). Same defect, same shape: BuildRustTimeline shells out to
+         cargo, cargo honors CARGO_TARGET_DIR, and this file then looked somewhere
+         cargo had not written. An explicitly-passed RustTimelineTargetDir still wins. -->
+    <RustTimelineTargetDir Condition="'$(RustTimelineTargetDir)' == '' And '$(CARGO_TARGET_DIR)' != ''">$(CARGO_TARGET_DIR)\release</RustTimelineTargetDir>
+    <RustTimelineTargetDir Condition="'$(RustTimelineTargetDir)' == ''">$(RustTimelineWorkspaceRoot)\target\release</RustTimelineTargetDir>
+  </PropertyGroup>
+
+  <Target Name="BuildRustTimeline" BeforeTargets="Build">
+    <Exec Command="cargo build -p timeline-render --release" WorkingDirectory="$(RustTimelineWorkspaceRoot)" />
+  </Target>
+
+  <Target Name="StageRustTimeline" AfterTargets="BuildRustTimeline">
+    <!-- THE PUBLISH-STAGING GAP THIS COMMENT RECORDED IS NOW CLOSED (plan 55-09).
+         Kept, rather than deleted, because the reasoning is still the reason the
+         target below exists:
+
+           This target copies to $(OutDir), NOT $(PublishDir) — exactly like
+           StageRustFfi does. `dotnet publish` therefore did NOT carry
+           rudis_timeline.dll (nor rudis_ffi.dll, nor the FFmpeg sidecars)
+           into the published tree.
+
+         "It must be fixed in the SAME change that fixes StageRustFfi — one
+         publish-staging story for every native artifact, not three half-fixes."
+         Honoured: StageRustTimelinePublish below and Rudis.Ffi.targets'
+         StageRustFfiPublish landed in one commit, both AfterTargets="Publish",
+         both leaving their $(OutDir) twin byte-identical. -->
+    <Copy SourceFiles="$(RustTimelineTargetDir)\rudis_timeline.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- rudis_timeline.dll into $(PublishDir). NOT optional and not cosmetic: the
+       Timeline region P/Invokes it by name (shell/Rudis.Shell/Regions/Timeline/
+       TimelineInterop.cs:591, `private const string Library = "rudis_timeline"`), so
+       a published payload without it renders no timeline at all. It is a SECOND
+       cdylib beside rudis_ffi.dll on purpose (its own wgpu major); the publish
+       payload needs both for the same reason the build output does. -->
+  <Target Name="StageRustTimelinePublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <PropertyGroup>
+      <_RudisTimelinePublishDir Condition="!HasTrailingSlash('$(PublishDir)')">$(PublishDir)\</_RudisTimelinePublishDir>
+      <_RudisTimelinePublishDir Condition="HasTrailingSlash('$(PublishDir)')">$(PublishDir)</_RudisTimelinePublishDir>
+    </PropertyGroup>
+    <Copy SourceFiles="$(RustTimelineTargetDir)\rudis_timeline.dll" DestinationFolder="$(_RudisTimelinePublishDir)" SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="StageRustTimelinePublish -> $(_RudisTimelinePublishDir)rudis_timeline.dll" />
+  </Target>
+</Project>

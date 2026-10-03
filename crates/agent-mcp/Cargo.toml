@@ -1,0 +1,42 @@
+[package]
+# DEV-ONLY MCP transport crate for the Rudis agent tool spine (v2, Phase 11).
+# This crate exposes v1's existing undoable `rudis_core::Command` surface over a
+# Model Context Protocol (MCP) stdio/in-process transport for deterministic,
+# zero-model eval harnessing. It is NEVER a dependency of the shipped build —
+# not of `crates/ffi` (the cdylib the native C# shell loads), and not of the
+# retired `src-tauri` before it — because beginners never see MCP. Keeping it in
+# its own workspace crate (mirroring the `surface_spike` feature-gating intent)
+# ensures the production Windows .exe never gains a tokio-based MCP server
+# surface.
+name = "agent-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis DEV-ONLY MCP transport for the agent tool spine — exposes existing rudis_core commands over an in-process MCP-shaped wire for deterministic eval. Never shipped in rudis-app."
+publish = false
+license.workspace = true
+
+[dependencies]
+# The v1 domain core (Store/Command/Tool/agent_state). A normal workspace path
+# dependency — `crates/core`'s OWN `offline_guard.rs` is unaffected (it inspects
+# `crates/core/Cargo.toml`, never its dependents). This crate WRAPS core's
+# already-proven machinery over MCP; it adds zero new business logic.
+core = { path = "../core" }
+# The ONE authored source of the shared agent tool schemas (Phase 16, TOOL-06):
+# `tool_defs()` + `parse_edit_tool` + `EDIT_TOOL_NAMES`. This crate's MCP tool
+# router is built PROGRAMMATICALLY from it, so both agent surfaces (agent-llm
+# and this dev harness) advertise byte-identical tool schemas by construction.
+agent-tools = { path = "../agent-tools" }
+rmcp = { version = "2.1", features = ["server", "client", "macros", "transport-io", "transport-async-rw", "schemars"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+
+[dev-dependencies]
+# TEST-ONLY: the v1 media engine (decode/probe/encode). Used SOLELY by
+# `tests/mcp_stub_export.rs` to prove SC-1/AUTH-01 on REAL output — the
+# deterministic stub client's MCP tool call must produce a mutation whose effect
+# is verifiable by an actual exported, frame-diffed file (CLAUDE.md "verify on
+# output"). The MCP server's own runtime code NEVER imports `engine`; this stays
+# out of the shipped `rudis-app` build exactly like the rest of this crate.
+engine = { path = "../engine" }

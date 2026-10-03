@@ -1,0 +1,229 @@
+[package]
+# Package is named `app-core` so the verification gate `cargo test -p app-core`
+# works. The lib target is renamed to `app_core` (Rust import paths follow the
+# LIB target name, and `-` is not a valid identifier), exactly like `core` ->
+# `rudis_core` next door.
+name = "app-core"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis domain/agent-tool dispatch logic behind the AppCtx trait -- shell-agnostic (the C# shell's crates/ffi cdylib today, other hosts later). Must stay free of desktop-shell-framework dependencies: enforced by crates/ffi/tests/offline_guard.rs and `cargo tree -p app-core -i tauri`."
+publish = false
+license.workspace = true
+
+[lib]
+name = "app_core"
+path = "src/lib.rs"
+
+[dependencies]
+# OFFLINE GUARANTEE (CLAUDE.md "Offline core"): this crate must stay free of
+# DIRECT HTTP/socket dependencies. Enforced by
+# `crates/ffi/tests/offline_guard.rs::app_core_has_no_direct_network_dependencies`,
+# which is a literal substring test over THIS file -- so do not name an HTTP
+# client crate anywhere in this manifest, not even inside a comment.
+#
+# ZERO desktop-shell-framework dependency is the whole point of the crate
+# (Phase 45, XTRC-01): a HOST implements `AppCtx` and this crate stays
+# shell-agnostic. The host is now `crates/ffi` -- the C ABI cdylib behind the
+# native C# shell -- which implements the trait unchanged; the retired Tauri
+# shell implemented the same trait for its `AppHandle<R>` before Phase 55's
+# GATE-07 cutover deleted it. Structurally proven by
+# `cargo tree -p app-core -i tauri` printing "did not match any packages".
+#
+# Domain core. Package is named `core`; its lib target is `rudis_core`, so code
+# here imports `rudis_core::...`.
+core = { path = "../core" }
+# Real-Claude agent types (Phase 12+). Added in plan 45-04, the batch that first
+# needs it: `AgentSession::history` is `Vec<agent_llm::MessageParam>`,
+# `Pending{AskUser,OptionChoice}::prior_tool_results` are
+# `Vec<agent_llm::ContentBlock>`, and `PendingOptionChoice::cards` is
+# `Vec<agent_llm::OptionCard>` -- so the session types cannot be relocated here
+# without it.
+#
+# `agent-llm` is one of the TWO sanctioned network-egress crates (CLAUDE.md's
+# "only future AI/MCP calls may touch the network"), so `app-core` now sits on
+# the inverted egress tree as a DEPENDENT -- exactly as `agent-gen` already
+# does. That is the state deferred item D-45-03-01 predicted; it forecast 45-11,
+# and it actually arrived here at 45-04. `app-core` still speaks no HTTP itself,
+# which is what `offline_guard.rs::app_core_has_no_direct_network_dependencies`
+# checks (over THIS file) and what keeps the guarantee durable.
+agent-llm = { path = "../agent-llm" }
+# External generation providers (Phase 31, GEN-05..09). Added in plan 45-11, the
+# batch that first needs it -- and the batch this manifest's earlier comment
+# forecast it for, so the forecast was exactly right.
+#
+# `generation_bridge`'s three modality handlers name `agent_gen::BackgroundMode`
+# and `ReferenceImage` in their bodies, and `GenSubmission`'s four methods name
+# both in their SIGNATURES -- so the trait cannot even be declared here without
+# this dependency. (It was five methods naming three types until Phase 55.1 plan
+# 06 deleted the capability enum and the method that returned it.) It is the SECOND sanctioned
+# network-egress crate (CLAUDE.md's "only future AI/MCP calls may touch the
+# network"); `app-core` gains a transitive path to that egress and still speaks
+# no HTTP of its own, which is exactly what
+# `offline_guard.rs::app_core_has_no_direct_network_dependencies` checks over
+# THIS file.
+#
+# Note for readers of deferred item D-45-03-01: the negative-list entry that
+# item was about (`"app-core"` in `UNSANCTIONED_WORKSPACE_CRATES`) was already
+# deleted at 45-04, when relocating `AgentSession` gave this crate `agent-llm`.
+# Nothing about that list changes here -- and it must NOT be re-added.
+agent-gen = { path = "../agent-gen" }
+# Media engine, with `tracking` (at the time this edge was added, the same
+# feature the then-live `src-tauri` enabled, so the workspace feature set was
+# unchanged by this crate's arrival). Subprocess sidecars only -- no network.
+engine = { path = "../engine", features = ["tracking"] }
+# SHELL-09's PRODUCER half (Phase 52, plan 52-02): `waveform::extract_peaks` and
+# the fail-closed per-media-item peak cache that `waveform_job` writes at import
+# time and reads behind `run_get_waveform_peaks`. A workspace path dep whose own
+# graph is `engine` + serde/serde_json/thiserror -- every one of which is
+# ALREADY here -- so this edge adds ZERO packages to the resolved tree. No
+# network, no subprocess of its own (it drives the engine's FFmpeg sidecar).
+waveform = { path = "../waveform" }
+# Phase 53.2's PRODUCER half (plan 53.2-02): `filmstrip::extract_strip` and the
+# fail-closed per-media-item strip cache that `filmstrip_job` writes at import
+# time and reads behind `run_get_filmstrip_strip`. The exact structural twin of
+# the `waveform` edge above, added for the exact same reason -- and, like it, a
+# workspace path dep whose own graph (`engine` + `image` + serde/serde_json/
+# thiserror) is ALREADY resolved here, so this edge adds ZERO packages to the
+# tree. No network, no subprocess of its own (it drives the engine's FFmpeg
+# sidecar).
+filmstrip = { path = "../filmstrip" }
+# Phase 58's PRODUCER half (plans 58-02/58-03): `proxy::generate` (the killable
+# all-intra transcode), `proxy::heaviness::needs_proxy` (D-08's import-time
+# trigger predicate) and `proxy::cache` (`PROXY_CACHE_DIR_NAME`, `read_fresh`)
+# — everything `src/proxy_job.rs` needs to run, bound, cancel and REPORT a
+# background proxy generation, and everything `src/import.rs` needs to decide
+# whether a just-probed source deserves one.
+#
+# The structural triplet of the `waveform` and `filmstrip` edges above, added
+# for the same reason and with the same properties: a workspace path dep whose
+# own graph is `engine` + serde/serde_json — every one of which is ALREADY
+# resolved here — so this edge adds ZERO packages to the tree. No network, no
+# subprocess of its own (it drives the engine's FFmpeg sidecar).
+proxy = { path = "../proxy" }
+# PROMOTED from this crate's `[dev-dependencies]` by plan 58-05, under the
+# promotion rule that section states in its own words and has now applied three
+# times (`base64` at 52-05, `image` at quick 260801-n7q): an entry MOVES UP the
+# moment a SHIPPED runtime path starts using it.
+#
+# That path is `transport::run_transport`, which now calls
+# `preview::decode_source::configure_proxy_cache_dir(..)` before it touches the
+# store. It is the ONE host-agnostic funnel every playback command passes
+# through, so configuring the decode-source resolver there is what makes a
+# fresh process resolve proxies from its first Play — on BOTH hosts, without
+# either shell learning the word "proxy" (58-CONTEXT D-24). `import.rs`'s D-07
+# trigger calls the same function for the same reason.
+#
+# MOVED, never duplicated: a `[dependencies]` entry is already visible to every
+# test target, so the three parity twins in `src/export.rs` that 55-03 added
+# this edge for compile against the promoted entry unchanged, and two entries
+# for one crate is a version-skew trap for no benefit.
+#
+# Zero lockfile churn and zero workspace feature movement: `preview`'s own graph
+# is `engine` + `core` + `serde` + `proxy`, all four ALREADY resolved in this
+# manifest, and it declares `engine` WITHOUT the `tracking` feature this crate
+# already enables. It names no HTTP client crate and no desktop-shell framework
+# anywhere in its own manifest (its Phase 46 D-02 discipline), so neither
+# `crates/ffi/tests/offline_guard.rs`'s literal-substring audit over THIS file
+# nor `cargo tree -p app-core -i tauri` changes answer. What DOES change is that
+# the edge is now visible in the cdylib's graph — which is correct, because
+# `crates/ffi` already depends on both crates directly and the shipped resolved
+# tree therefore gains no package at all.
+preview = { path = "../preview" }
+# The render cache's LEAF crate (Phase 59, D-39's bottom layer) — the structural
+# triplet of the `waveform`, `filmstrip` and `proxy` edges above, added for the
+# same reason and with the same properties: a workspace path dep whose own graph
+# is `engine` + `core` + serde/serde_json, every one of which is ALREADY resolved
+# here, so this edge adds ZERO packages to the tree. No network, no subprocess of
+# its own (it drives the engine's FFmpeg sidecar).
+#
+# EXACTLY ONE file in `crates/app-core/src` may name it: `render_cache_job.rs`,
+# the scheduler. That is D-39's split enforced where the dependency is declared —
+# the same rule `crates/preview/Cargo.toml` states for its own two-file limit
+# (D-40), and 59-08's verification greps `crates/app-core/src` for the crate name
+# expecting hits in that file and nowhere else. `export.rs` in particular must
+# stay entirely ignorant that a render cache exists (CACHE-05 / D-27a), and a
+# text scan cannot tell prose from a call — so a source file that must not CALL
+# it must not MENTION it either, not even in a doc comment (`dynres.rs`'s
+# recorded footgun). This manifest is outside that scan's path.
+rendercache = { path = "../rendercache" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# `run_get_waveform_peaks`'s `peaks_b64` field (Phase 52, plan 52-05). PROMOTED
+# from this crate's `[dev-dependencies]` (where 45-05 put it for the inspect
+# gate's JPEG round-trip) because a SHIPPED export now serializes with it: a
+# multi-hour source's peak array is ~4x larger as a JSON number array than as
+# base64, and this payload crosses the C ABI once per media item. Same version
+# `agent-llm`/`agent-gen` (and, at the time, `src-tauri`) already resolve, so
+# nothing moves in the lock. Offline: pure encoding, no I/O of any kind.
+base64 = "0.22"
+# `media_reference::downscale_frame_rgba` (quick 260801-n7q). PROMOTED from this
+# crate's `[dev-dependencies]` (where 45-05 put it for the inspect gate's JPEG
+# round-trip) because a SHIPPED runtime path now resizes with it: an oversized
+# still used as a conditioning reference is DOWNSCALED to the 1568px long edge
+# via `image::imageops::resize` instead of being rejected, which is the whole
+# point of that fix. Exactly the same promotion `base64` got at plan 52-05, for
+# exactly the same reason -- and, like it, MOVED rather than duplicated: a
+# `[dependencies]` entry is already visible to every test target, and two
+# entries for one crate is a version-skew trap for no benefit.
+#
+# Zero lockfile churn: `engine` and `filmstrip` -- both already resolved here --
+# declare this exact version and feature set. Offline: pure in-memory pixel
+# work, no I/O of any kind.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Runtime plumbing ONLY, added in plan 45-07 for `import::import_one_path`'s two
+# `tokio::task::spawn_blocking` calls (Phase 43 LAT-08 moved the per-file
+# ffprobe/poster subprocess spawns off the async-runtime thread). NOT a new
+# runtime: the HOST already declares tokio directly with a superset of these
+# features, so the workspace feature set is unchanged. `spawn_blocking` resolves
+# against the AMBIENT runtime, which on every path into that function is the
+# host's own -- today the multi-thread runtime that `FfiAppCtx::block_on` builds
+# in `crates/ffi/src/ctx.rs`; before Phase 55's cutover it was the retired Tauri
+# shell's (`tauri::async_runtime` was itself a thin wrapper over this same
+# crate). See `import.rs`'s module doc (T-45-05). Not a network crate;
+# `offline_guard.rs`'s NETWORK_CRATES names none of tokio.
+#
+# Plan 52-05 adds `"sync"` for exactly ONE item: `tokio::sync::Semaphore`, the
+# bound on how many waveform extractions may be in flight at once
+# (`waveform_job::MAX_CONCURRENT_WAVEFORM_JOBS`). It has to be the ASYNC
+# semaphore rather than a `Condvar`-based one: a blocking wait would be taken
+# INSIDE `spawn_blocking`, so a 200-file batch import would park 200 blocking-
+# pool threads waiting for a permit instead of 2. The host of the day already
+# declared a superset of these features, so the workspace feature set was still
+# unchanged.
+#
+# Phase 54.1 (plan 54.1-01) adds `"time"` for exactly TWO things, both belonging
+# to the generation host-glue this crate just absorbed: the moved job poll
+# loop's sleep/backoff (`tokio::time::sleep(provider.poll_interval())`) and the
+# agent seams' wait-cap timeout, which arrive with plan 54.1-03. Added HERE, in
+# the batch that CREATES `generation_host`, so the manifest edit sits with the
+# module rather than showing up unexplained two plans later. Deliberately just
+# `"time"` and not a wider set (`net`, `io-util`, `process`, `full`): a narrower
+# feature list is the point. Not a network crate; `offline_guard.rs`'s
+# NETWORK_CRATES names none of tokio, and the host already declared
+# `["rt", "rt-multi-thread", "time"]`, so the workspace feature set was STILL
+# unchanged by this addition.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+# `TestAppCtx`'s per-instance `app_data_dir`/`app_cache_dir` isolation (the
+# shell-framework-free equivalent of the retired `src-tauri`'s
+# `build_app_isolated`). Small, offline, MIT/Apache-2.0, and already in
+# Cargo.lock via the existing tree.
+tempfile = "3"
+# This section is once again ONE entry, and that is deliberate. THREE crates
+# have now passed through it and each MOVED UP to `[dependencies]` when a
+# shipped runtime path started using it -- `base64` (plan 52-05), `image`
+# (quick 260801-n7q) and, most recently, `preview` (plan 58-05, when
+# `transport::run_transport` began configuring the decode-source resolver's
+# proxy cache dir for both hosts). See their entries there for the reasoning in
+# each case; the RULE is the same one every time, and it now has enough
+# instances to be a convention rather than a precedent.
+#
+# None of the three is duplicated back down here: a `[dependencies]` entry is
+# already visible to every test target, and two entries for one crate is a
+# version-skew trap for no benefit. The tests that first pulled each of them in
+# -- 45-05's migrated inspect gates (`image`), and 55-03's three `src/export.rs`
+# parity twins that name `preview::{resolve_multilayer,
+# compose_multilayer_from_pool, RingCtl, spawn_producer, PreviewHost,
+# PlaybackMirror}` -- still compile against the promoted entries, unchanged.

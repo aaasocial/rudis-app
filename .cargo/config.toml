@@ -1,0 +1,57 @@
+# Root workspace build configuration — added by Phase 48 (plan 48-03) so a plain
+# `cargo build` / `cargo test` finds and links the version-matched LGPL FFmpeg
+# under crates/engine/ffmpeg-dev/ with NO per-session environment setup, for the
+# engine's `hwdecode` feature (in-process D3D11VA preview decode).
+#
+# Every key below was chosen by READING rusty_ffmpeg 0.16.7+ffmpeg.8's actual
+# `build.rs` (the sys crate behind rsmpeg 0.18) in the local registry cache —
+# not guessed from docs. What that build script really honors, on Windows:
+#
+#   FFMPEG_DLL_PATH      checked FIRST in main(); if set, takes the
+#                        `dynamic_linking()` branch. When the value is a
+#                        DIRECTORY it emits `rustc-link-search=native=<dir>`
+#                        plus `rustc-link-lib=dylib=<lib>` for all seven libs.
+#   (libs-dir route)     rusty_ffmpeg's ALTERNATIVE entry point (see the spike's
+#                        spikes/44-hwaccel/.cargo/config.toml for its full name)
+#                        — its link mode DEFAULTS TO STATIC
+#                        (`env_vars.ffmpeg_link_mode.unwrap_or(FFmpegLinkMode::Static)`).
+#   FFMPEG_LINK_MODE     "static" | "dynamic" — only consulted on that
+#                        alternative libs-dir path.
+#   FFMPEG_INCLUDE_DIR   bindgen input; generates bindings from the REAL headers.
+#
+# LICENSING — this is why FFMPEG_DLL_PATH and not the alternative libs-dir
+# entry point (CLAUDE.md rule 6: FFmpeg must be LGPL and DYNAMICALLY linked,
+# never static). `dynamic_linking()` hardcodes `FFmpegLinkMode::Dynamic`; there
+# is no env var that can flip it. Going in via the libs-dir route would default
+# to STATIC linking and would rely on remembering to also set
+# FFMPEG_LINK_MODE=dynamic. The safe door is the one that cannot be opened
+# wrong. See PROVENANCE.md Entry 21 (which names the avoided variable).
+#
+# `relative = true` resolves each value against the parent directory of this
+# `.cargo` folder (the repo root), so these become absolute paths without
+# hardcoding anyone's checkout location.
+#
+# NOTE: FFMPEG_DLL_PATH points at ffmpeg-dev/lib/, not ffmpeg-dev/bin/. On MSVC,
+# `rustc-link-lib=dylib=avcodec` resolves against the IMPORT library
+# `avcodec.lib`, which lives in lib/; the matching avcodec-62.dll in bin/ is
+# needed at RUN time and is staged into target/<profile>/ (and .../deps/) by
+# crates/engine/build.rs so test binaries load with zero per-session PATH setup.
+
+[env]
+FFMPEG_DLL_PATH = { value = "crates/engine/ffmpeg-dev/lib", relative = true }
+FFMPEG_INCLUDE_DIR = { value = "crates/engine/ffmpeg-dev/include", relative = true }
+
+# bindgen (via clang-sys) needs libclang, and the VERSION IS LOAD-BEARING — a
+# real Phase-44 finding, not boilerplate. rsmpeg 0.18 pins rusty_ffmpeg ^0.16.7,
+# which build-depends on bindgen ^0.71 (only 0.71.1 exists). Against libclang
+# 22.1.8, bindgen 0.71.1 SILENTLY emits INCOMPLETE types: AVFormatContext,
+# AVOption, AVBPrint, AVFilterGraph and even libc's `struct tm` came out as
+# `{ _address: u8 }` while the layout assertion still carried the correct size
+# (472 for AVFormatContext). Against the pinned libclang 18.1.1 the exact same
+# tree builds clean. crates/engine/build.rs verifies the pinned DLL's SHA256
+# against its fetch-time sidecar and fails LOUDLY otherwise.
+#
+# Not `force`d: an explicit LIBCLANG_PATH in the environment still wins — and
+# the build.rs guard then verifies THAT dll too, so a machine-global libclang 22
+# cannot silently produce wrong bindings.
+LIBCLANG_PATH = { value = "crates/engine/libclang", relative = true }

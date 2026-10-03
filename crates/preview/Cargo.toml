@@ -1,0 +1,133 @@
+[package]
+# Package is named `preview`, so the verification gate `cargo test -p preview`
+# works, and the lib target keeps the same name (no rename needed: `preview`
+# collides with nothing in the standard library, unlike `core` -> `rudis_core`
+# next door). Code in this crate is reached as `preview::...`.
+name = "preview"
+version = "0.1.0"
+edition = "2021"
+# ⚠ DELIBERATE WORDING (Phase 46, plan 46-02). This manifest contains the
+# substring "t-a-u-r-i" NOWHERE — not as a dependency, not in this description,
+# not inside a comment, and not even as part of the shell crate's DIRECTORY
+# name. D-02's control is a literal substring check — `grep -c` for that
+# framework's name over THIS file must return 0, re-run by every later wave that
+# edits it — and a substring guard cannot tell an explanatory mention (or a
+# quoted grep pattern, or a path) from a real dependency. Exactly the
+# discipline `crates/app-core/Cargo.toml` already applies to HTTP-client names
+# for the offline guarantee. So "shell-free" below means "zero dependency on the
+# desktop-shell framework the Rudis shell crate is built on"; see
+# `crates/preview/src/lib.rs`'s module doc, which is NOT substring-gated and
+# names things plainly.
+description = "Rudis preview engine: present loop, frame pacing, A/V clock, seek/flush -- behind the PresentSink/PreviewHost ports, shell-free (Phase 46)"
+publish = false
+license.workspace = true
+
+[dependencies]
+# Media engine: `Frame`, `EngineError`, `Layer`/`LayerTransform`/`LayerCrop`
+# appear in the port signatures. Declared WITHOUT the `tracking` feature —
+# nothing in the preview path tracks objects, and the shell crate and `app-core`
+# already enable it, so the workspace's unified feature set is unchanged by this
+# crate's arrival. Building `-p preview` on its own therefore also proves the
+# preview engine needs no tracking toolchain.
+engine = { path = "../engine" }
+# Domain core. Package is named `core`; its lib target is `rudis_core`
+# (see crates/core/Cargo.toml), so code here imports `rudis_core::...` —
+# `Store`, `Playback`, `Annotation`, `TextPayload`.
+core = { path = "../core" }
+# Playback-proxy cache (Phase 58, PROXY-03 / 58-CONTEXT D-16). Reached from
+# EXACTLY ONE file in this crate — `src/decode_source.rs`, the D-05 resolver
+# seam — and from exactly one function in it: `cache::read_fresh`, a
+# stats-plus-one-bounded-read lookup that opens no video and starts no
+# subprocess (`crates/proxy` pins both at the source level, because this call
+# runs on the resolve path — D-18). This is the FIRST `preview -> proxy` edge in
+# the workspace, and D-16 means it to stay the ONLY consumer inside this crate:
+# the proxy LOGIC — the staleness check and the fallback decision — lives in
+# `decode_source.rs` alone, so no other module here may name this crate. A
+# `grep -rn "read_fresh" crates/preview/src` returning hits in a second file is
+# that rule being broken.
+#
+# The graph this adds is ALREADY resolved in this manifest: `proxy` depends on
+# `engine` (declared above, same default feature set) plus serde/serde_json, and
+# on nothing else in the workspace — it is a leaf, so this edge cannot create a
+# cycle. It names no HTTP/socket crate, so the offline guarantee stated below is
+# unaffected, and no desktop-shell framework, so the substring discipline stated
+# at the top of this file is unaffected too.
+proxy = { path = "../proxy" }
+# Program-level render cache (Phase 59, CACHE-01..05 / 59-CONTEXT D-39/D-40).
+# Reached from EXACTLY TWO files in this crate — `src/render_cache_lookup.rs`
+# (the D-19 READER, added by plan 59-05) and the composite-side WRITER (plan
+# 59-07) — and from nowhere else. D-40 amends D-20's "exactly one file" to that
+# number and to those filenames, because the render LOOP has to live in this
+# crate too (it needs `multilayer.rs`'s `pub(crate)` compose path, and widening
+# that to `pub` to buy one caller would export the multilayer resolver's
+# internals across a crate boundary). The rule is pinned by a source-level scan,
+# not merely intended: the ring, the compositor, the coordinator, the presenter
+# and `decode_source.rs` must stay entirely ignorant that a render cache exists.
+#
+# The graph this adds is ALREADY resolved in this manifest: `rendercache`
+# declares exactly two workspace path deps — `core` and `engine`, both declared
+# above with the same default feature set — and names no other crate in this
+# workspace at all. It is a LEAF by construction (`grep -c 'path = '` on its
+# manifest returns 2, and the reason it must stay 2 is written in that manifest),
+# so this edge cannot create a cycle. It names no HTTP/socket crate, so the
+# offline guarantee stated below is unaffected, and no desktop-shell framework,
+# so the substring discipline stated at the top of this file is unaffected too.
+rendercache = { path = "../rendercache" }
+# OFFLINE GUARANTEE (CLAUDE.md "Offline core"): serde is data-only — it derives
+# `Deserialize` for `PreviewRect` (the frontend's reported preview rect) and
+# nothing else; no HTTP/socket crate may ever be named in this manifest.
+#
+# `serde_json` was declared at 46-02 solely to carry `PreviewHost::emit`'s
+# opaque `Value` payload. Wave 46-07 replaced that speculative generic emit with
+# the narrow `emit_canvas_viewport(win_w, win_h, frame_w, frame_h)` — four
+# integers, no JSON — so the dependency has no remaining user here and is gone.
+# Building the payload is the shell adapter's job now, in the shell's own crate.
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# FIRST dev-dependency this crate has ever declared. `decode_source`'s Phase-58
+# fallback matrix fabricates a whole proxy cache directory per case — a source
+# file, a payload, a meta — and then corrupts one of them; `TempDir` removes the
+# lot on drop even when an assertion fails mid-test, and gives every case its own
+# directory so the cases can run concurrently. Same crate, same reason, as
+# `crates/proxy`, `crates/app-core` and `crates/ffi` already use it.
+#
+# Dev-only: it is absent from the shipped dependency graph entirely, so neither
+# the offline guarantee nor the substring discipline stated above is touched.
+tempfile = "3"
+# Dev-only, for ONE test binary: `tests/gpu_oom_guard.rs` proves that a REAL
+# `wgpu::Error::OutOfMemory` on a presentation-capable device engages the
+# hardware-decode session latch instead of panicking the present thread
+# (debug session `gpu-oom-guard-lost-in-the-cutover`). That proof
+# has to (a) construct an instance with a HOSTILE
+# `MemoryBudgetThresholds::for_resource_creation` — wgpu's own
+# QueryVideoMemoryInfo circuit breaker, the same knob production arms at 95% —
+# and (b) allocate real textures on `Compositor::device()` until the process's
+# real DXGI budget share is crossed, so it must name `wgpu` types directly.
+# Pinned to the SAME major the engine declares, so the lockfile resolves one
+# wgpu and the types unify.
+#
+# Dev-only: absent from the shipped dependency graph, so neither the offline
+# guarantee nor the substring discipline stated above is touched.
+wgpu = "26"
+# Phase 61 (idle cache warming), for ONE test binary: `tests/bench01_baseline.rs`'s
+# bench61 arm must drive the REAL production pump body
+# (`app_core::render_cache_job::pump_tick`) -- a hand-rolled stand-in would test
+# the stand-in, not what ships (61-RESEARCH Pitfall 1). `app-core` depends on this
+# crate, so this is a dev-dependency CYCLE, which Cargo explicitly permits
+# (dev-dependencies may depend on the crate that defines them); it is absent from
+# the shipped dependency graph, so neither the offline guarantee nor the substring
+# discipline stated above is touched.
+app-core = { path = "../app-core" }
+
+[features]
+# Phase 48 (plan 48-08): forwards the engine's in-process hardware-decode
+# feature so the GPU-resident PresentSink method and ring payload variant can
+# name `engine::GpuFrame` behind `cfg(all(windows, feature = "hwdecode"))` —
+# a cfg feature predicate reads THIS crate's namespace, so the forwarder must
+# exist here even though the engine dependency above already enables the
+# engine-side half by default. Default ON, mirroring the engine's own default;
+# `--no-default-features` compiles the CPU-only port surface (the compile-time
+# half of the SPIKE-06 re-isolation fallback, one hop up the dependency arrow).
+default = ["hwdecode"]
+hwdecode = ["engine/hwdecode"]

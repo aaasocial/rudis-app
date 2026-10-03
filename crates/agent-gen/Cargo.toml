@@ -1,0 +1,43 @@
+[package]
+name = "agent-gen"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis external-generation seam (Phase 31, GEN-05..09): the provider-agnostic GenProvider abstraction, job registry and allow-list gate. One of the two sanctioned network-egress crates (with agent-llm) -- it confines ALL generation-provider HTTP egress, so crates/core stays network-free per CLAUDE.md's 'only AI calls touch the network' carve-out."
+publish = false
+license.workspace = true
+
+# DELIBERATE NON-DEPENDENCIES (each is a Phase-31 research decision, not an
+# oversight -- see 31-RESEARCH.md "Standard Stack"):
+#   * a desktop-shell framework -- the HOST owns the generation commands, not
+#                this crate. That host is `crates/ffi` (the C ABI cdylib behind
+#                the native C# shell); the host glue itself now lives in
+#                `crates/app-core/src/generation_host.rs`. It was
+#                `src-tauri/src/generation.rs` when this list was written, before
+#                Phase 55's GATE-07 cutover retired that shell.
+#   * tokio   -- the job poll-loop's sleep/backoff timer belongs to the host,
+#                which already has tokio as a direct dependency. (Phase 54.1
+#                moved that loop into `app-core`, which declares tokio "time".)
+#   * keyring -- reused TRANSITIVELY via the `agent-llm` path dep below, never
+#                declared here, so `crates/ffi/tests/offline_guard.rs`'s
+#                `keyring_is_reachable_only_via_agent_llm` assertion stays
+#                literally true with the test byte-unchanged.
+#   * uuid    -- job ids follow the existing `next_id()` millis+seq convention.
+[dependencies]
+# Reuse of the generalized KeyStore/KeyringStore/InMemoryKeyStore types ONLY
+# (Phase 31, GEN-06). This is also what keeps `keyring` confined to one path.
+agent-llm = { path = "../agent-llm" }
+# decode data[0].b64_json -- same crate agent-llm already uses for the Phase-13 vision path.
+base64 = "0.22"
+# Domain types (package `core`, lib target `rudis_core`) -- same convention as
+# crates/agent-llm/Cargo.toml.
+core = { path = "../core" }
+reqwest = { version = "0.13", features = ["json", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+# Lets a plain `#[test]` drive the `GenProvider` trait's `async fn`s without
+# adding tokio as a runtime dependency (this crate is deliberately tokio-free —
+# see the non-dependency note above). Exact precedent: agent-llm/Cargo.toml:38.
+pollster = "0.4"

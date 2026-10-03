@@ -1,0 +1,155 @@
+[package]
+name = "timeline-render"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license.workspace = true
+
+# ---------------------------------------------------------------------------
+# PROMOTED into the root workspace by plan 52-04 (2026-07-30).
+# ---------------------------------------------------------------------------
+# Until now this crate carried its own `[workspace]` table so that an UNPROVEN
+# second wgpu major could not perturb the root Cargo.lock or break `cargo
+# build` at the repo root while it was still an experiment (plan 52-01's
+# reasoning, precedent spikes/44-hwaccel/Cargo.toml:12-13).
+#
+# That condition is discharged. `artifacts/52-01-tripwire.md` records a bare
+# `VERDICT: GO`, and assumption A2 is proven in BOTH halves: the build half by
+# this crate compiling against glyphon's own wgpu major, and the runtime half
+# by a real in-process `rudis_export_timeline` — which constructs the frozen
+# crate's wgpu-26 DX12 compositor — running to a decodable file while two
+# wgpu-29 swapchains presented. So the table is gone and
+# `crates/timeline-render` is a member of the root workspace.
+#
+# NOTE the profile that used to live at the bottom of this file: `[profile.*]`
+# is honoured only in a WORKSPACE ROOT manifest, so it moved to the root
+# Cargo.toml as `[profile.release.package.timeline-render] debug = true` —
+# package-scoped, so the PDBs this cdylib needs do not become every crate's
+# cost. Do not re-add a profile table here; cargo would ignore it.
+
+[lib]
+# The cdylib must be named rudis_timeline.dll — that is the name
+# Rudis.Timeline.targets stages and the name [LibraryImport("rudis_timeline")]
+# resolves from the C# side. Without this the artifact would inherit the
+# package name and be timeline_render.dll.
+name = "rudis_timeline"
+# rlib so the crate's own unit tests can link it; cdylib so the shell can.
+# A SEPARATE cdylib from rudis_ffi.dll on purpose: two wgpu majors then never
+# share one symbol table, and the 23-export C ABI surface stays untouched by
+# anything rendering does.
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+# EXACT pins (`=`), never carets — the determinism rule plan 50-08 applied to
+# FlaUI. Version pair verified live against the crates.io sparse index on
+# 2026-07-30: glyphon 0.11.0 requires wgpu ^29.0.0, and 29.0.1 is the newest
+# 29.0.x that satisfies it without floating onto a release nobody checked.
+# glyphon's own ladder jumps ^25 -> ^28, so NO glyphon release targets wgpu 26
+# or 27 — that is the load-bearing reason this crate needs its own pin at all.
+wgpu = "=29.0.1"
+# Declared NOW, at tripwire time, even though no text is drawn until plan
+# 52-04: the point is to prove the dual-major LINK compiles today rather than
+# discover it after the renderer is built on top. Licence (MIT OR Apache-2.0
+# OR Zlib) is transcribed verbatim from the vendored source into this plan's
+# artifact; the PROVENANCE.md entry belongs to 52-04, at the moment this crate
+# is promoted into the shipping build graph.
+glyphon = "=0.11.0"
+# wgpu 29's adapter/device requests are async; this crate has no runtime and
+# wants none. block_on is the whole dependency.
+pollster = "=0.4.0"
+# ONLY used for GUID + IUnknown::query — the QueryInterface that must happen
+# BEFORE any pointer reaches wgpu. Pinned to the version whose API shape is
+# already PROVEN by spikes/44-hwaccel (its swapchain_host.rs uses exactly
+# `IUnknown::from_raw_borrowed` + `.query(&GUID, &mut ptr)`), rather than
+# re-deriving the call against a newer windows-core. wgpu links its own,
+# different `windows` version internally; two versions of that crate coexist
+# in one binary by construction.
+windows = { version = "=0.58.0", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+] }
+# ---------------------------------------------------------------------------
+# Plan 52-12 — the composition-scale compensation (D1 + D2 + D3).
+# ---------------------------------------------------------------------------
+# THREE new DIRECT edges, ZERO new third-party code. Every one of these
+# resolves to a version ALREADY in the root `Cargo.lock` as a transitive
+# dependency of the `wgpu = "=29.0.1"` above (`wgpu-hal 29.0.4` at
+# Cargo.lock:6624, `windows 0.62.2` at Cargo.lock:6785) — the same argument the
+# `bytemuck` note below makes, and it was verified by `git diff Cargo.lock`
+# rather than assumed.
+#
+# ⚠ DO NOT RUN `cargo update` TO "TIDY" THIS. 52-10 § 2.3 records that the
+# `gpu-allocator 0.28.0 -> windows` edge (whose declared range is
+# `">=0.53, <=0.62"`, spanning three mutually incompatible 0.x lines) is
+# HAND-PINNED to 0.62.2 and is the first hand-edited resolution in this
+# repository's history. A refresh re-opens it and breaks the wgpu-29 build with
+# "there are multiple different versions of crate `windows` in the dependency
+# graph".
+
+# For `wgpu_hal::api::Dx12`, so `Surface::as_hal` can reach the live swapchain
+# `wgpu` created. `dx12::Surface::swap_chain()` is a PUBLIC accessor
+# (`wgpu-hal-29.0.4/src/dx12/mod.rs:633`) that wgpu exposes deliberately for
+# exactly this class of platform integration — it is shape-identical to the
+# 26.0.6 accessor `crates/ffi` already uses at `:561`, which is what makes the
+# technique portable between the two majors. `default-features = false` keeps
+# the feature union exactly what `wgpu` already selected (its own `dx12`
+# feature is what puts `api::Dx12` in the build). MIT OR Apache-2.0.
+wgpu-hal = { version = "=29.0.4", default-features = false }
+# ALIASED, and the alias is the point. `wgpu-hal 29.0.4` binds `windows 0.62`,
+# so the `IDXGISwapChain3` its accessor hands back is a 0.62 type and the
+# interface work must happen in the 0.62 universe. The `windows = "=0.58.0"`
+# pin above — which the `ISwapChainPanelNative` QueryInterface uses, and which
+# is pinned to wgpu-hal 26's own choice for the same ABI-compatibility reason —
+# is LEFT COMPLETELY ALONE. Two `windows` majors coexist in one binary by
+# construction, exactly as that pin's own comment already states.
+#
+# NO FEATURES, deliberately: the only item this crate names from it is the
+# `windows::core` re-export of `windows-core` (for `Interface::as_raw`), and
+# that re-export is UNCONDITIONAL (`windows-0.62.2/src/lib.rs:19`, read from
+# the vendored source rather than guessed). The DXGI types themselves are named
+# by `composition-scale`, which carries the `Win32_Graphics_Dxgi` feature.
+# MIT OR Apache-2.0.
+windows-dxgi = { package = "windows", version = "=0.62.2" }
+# THE fix, and the ONE implementation of it in this repository. See that crate's
+# module doc for the measurement, the rejected alternative, and why its API
+# takes a raw COM pointer instead of a `wgpu::Surface` (it is shared with
+# `crates/ffi`, which is on a different wgpu major).
+composition-scale = { path = "../composition-scale" }
+
+# ---------------------------------------------------------------------------
+# Plan 53.2-05 — the filmstrip atlas's rectangle allocator (D-16).
+# ---------------------------------------------------------------------------
+# A NEW DIRECT EDGE, ZERO NEW CRATES. `etagere 0.3.0` is ALREADY in the root
+# `Cargo.lock` as a transitive dependency of the `glyphon = "=0.11.0"` above —
+# glyphon uses it to pack its own glyph atlas. The reason a direct edge is
+# needed at all is that glyphon's `AtlasAllocator` instance is PRIVATE: there
+# is no accessor, no re-export and no way to rent space in glyphon's texture
+# for something that is not a glyph. So this crate allocates in its OWN
+# 4096x4096 filmstrip texture, with its own allocator, and the two never meet.
+#
+# CARET, not an exact pin, and for the `bytemuck` reason stated below rather
+# than by oversight: etagere is a single semver-compatible `0.3.x` line that
+# glyphon already resolves, so cargo unifies it to ONE version whatever this
+# file asks for. An exact pin here would not buy determinism — it would only be
+# a second opinion that can contradict glyphon's and force a resolution
+# failure the next time glyphon moves within 0.3.
+#
+# NO FEATURES, deliberately. etagere declares NO default features at all
+# (`serialization`, `checks`, `ffi`, `std` are all opt-in), and the only items
+# named from it are `AtlasAllocator`, `AllocId`, `Allocation` and `size2` — see
+# `src/atlas.rs`. Licence `MIT OR Apache-2.0`, transcribed verbatim from the
+# vendored crate's own manifest into PROVENANCE.md's entry for this edge.
+etagere = "0.3"
+
+# The instanced-quad instance buffer is uploaded as raw bytes, and `bytemuck`
+# is the standard sound way to say "this #[repr(C)] POD IS a byte slice"
+# instead of hand-writing a transmute.
+#
+# CARET, not an exact pin, and deliberately the SAME requirement string the
+# frozen `crates/engine/Cargo.toml:12` already carries. bytemuck is a single
+# semver-compatible `1.x` line that both wgpu majors depend on transitively, so
+# the workspace unifies it to ONE version regardless of what this file asks
+# for; an exact pin here would not buy determinism, it would only be a second
+# opinion that can contradict the frozen crate's and force a resolution
+# failure. No new crate enters the graph — it was already there.
+bytemuck = { version = "1", features = ["derive"] }

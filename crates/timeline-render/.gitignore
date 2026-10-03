@@ -1,0 +1,17 @@
+# SUPERSEDED by plan 52-04's promotion into the root workspace. This file is
+# kept, emptied of rules, on purpose: the two rules it used to carry are now
+# wrong, and a reader who finds the file simply gone learns nothing about why.
+#
+#   * `target/` — dropped. This crate was its OWN workspace root until 52-04,
+#     so cargo put build output in `crates/timeline-render/target/`, which the
+#     repo-root `.gitignore` does not cover. As a member, its output goes to
+#     the repo-root `target/`, which IS covered. The stale local directory was
+#     deleted with the promotion.
+#
+#   * `Cargo.lock` — the standalone lock was deliberately COMMITTED (it was the
+#     only record of which wgpu 29 patch the D-05 tripwire was measured
+#     against). It is now deleted: a member crate has no lock of its own, and
+#     the root `Cargo.lock` absorbed the tree. That record is not lost — the
+#     resolved versions and their verbatim licence strings are transcribed in
+#     `.planning/phases/52-timeline-region/artifacts/52-01-tripwire.md` §4, and
+#     from this plan onward in `PROVENANCE.md`.

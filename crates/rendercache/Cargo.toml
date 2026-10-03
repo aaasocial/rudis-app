@@ -1,0 +1,56 @@
+[package]
+name = "rendercache"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis timeline render cache (Phase 59, CACHE-03/CACHE-04): the identity of a program-time segment (a hash of everything that segment composites from), the on-disk segment file format, meta-last atomic commit, fail-closed reads and a byte-budget LRU. Knows NOTHING about compositing -- that lives in crates/preview (59-CONTEXT D-39)."
+publish = false
+license.workspace = true
+
+[dependencies]
+# The domain types the key material is ENUMERATED FROM. D-37's rule, stated
+# once: "the types are the truth" -- the segment hash is built by destructuring
+# `rudis_core::Clip` field by field, so the day a pixel-affecting field is added
+# to that struct this crate stops compiling until someone decides where the new
+# field belongs. That compile break IS the mechanism; a prose list in a decision
+# document cannot fail a build.
+core = { path = "../core" }
+# The media engine. At THIS plan's scope exactly three items are used:
+# `frame_step_us` (D-07's program-time -> cache-file-time identity is anchored to
+# the engine's own step function, never to a second one), plus
+# `DEFAULT_VIDEO_ENCODER` / `DEV_ENCODER_OVERRIDE_ENV` -- the encoder identity
+# must be part of the segment meta so a DEV-override segment can never
+# masquerade as a shipped-encoder one (58 D-03's discipline, inherited).
+# Plan 59-04's `generate.rs` additionally spawns the encode child from here.
+engine = { path = "../engine" }
+serde = { version = "1", features = ["derive"] }
+# The meta file is JSON so the FULL segment key (hash + geometry + fps + encoder
+# + payload length) lives INSIDE it. The file name carries only a 64-bit FNV
+# hash, and a hash collision must degrade to a MISS rather than to a
+# confidently-served WRONG segment (threat T-59-02-04).
+serde_json = "1"
+
+[dev-dependencies]
+# The cache tests fabricate whole directories of payload/meta/orphan/temp files;
+# `TempDir` removes them on drop even when an assertion fails mid-test.
+tempfile = "3"
+
+# ---------------------------------------------------------------------------
+# LEAF CRATE -- this is load-bearing, not a style note.
+#
+# `rendercache` depends on `core` and `engine` and on NOTHING ELSE in this
+# workspace. It must never depend on `preview` or `app-core`: 59-CONTEXT D-39
+# splits this subsystem into three layers, and `preview` gains a
+# `preview -> rendercache` edge in 59-05. That edge is acyclic BY CONSTRUCTION
+# only for as long as the two path dependencies above are the only ones here.
+#
+# The practical consequence for this crate's API: the resolved decode-source
+# answer (Original vs Proxy, D-14) crosses in as PLAIN DATA
+# (`key::DecodeAnswerTag`). This crate must not learn what a proxy is --
+# `crates/preview/src/decode_source.rs` keeps that knowledge, and Phase 58 D-16's
+# one-file-knows-about-proxies property stays intact.
+#
+# NAMING HAZARD, called out deliberately: `crates/timeline-render` already
+# exists and is something else entirely -- the C# shell's Timeline REGION
+# renderer (Phase 52, `rudis_timeline.dll`, its own second wgpu major). Do not
+# link it, do not extend it, do not confuse the two.
+# ---------------------------------------------------------------------------

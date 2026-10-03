@@ -1,0 +1,28 @@
+[package]
+name = "proxy"
+version = "0.1.0"
+edition = "2021"
+description = "Rudis playback-proxy cache (Phase 58, PROXY-05): stable on-disk identity for generated all-intra proxies, fail-closed freshness checks, temp-then-rename writes with the meta file as the commit marker, and a byte-budget LRU bound. The read side never decodes a frame and never starts a subprocess."
+publish = false
+license.workspace = true
+
+[dependencies]
+# The media engine. At this plan's scope EXACTLY two items are used --
+# `DEFAULT_VIDEO_ENCODER` and `DEV_ENCODER_OVERRIDE_ENV`, both already `pub use`d
+# at that crate's root -- because the encoder identity must be part of the cache
+# key: a DEV-override proxy must never be able to masquerade as a
+# shipped-encoder one (58-CONTEXT D-03). Plan 58-03's job side additionally calls
+# `engine::spawn_proxy_encode` from this crate. Mirrors how `crates/filmstrip`
+# and `crates/waveform` depend on `engine` and on nothing else in the workspace:
+# this crate is a LEAF, and it must stay one.
+engine = { path = "../engine" }
+serde = { version = "1", features = ["derive"] }
+# The meta file is JSON so the FULL key can live INSIDE it. The file name is only
+# a 64-bit FNV hash, and a hash collision must degrade to a MISS rather than to a
+# confidently-served WRONG proxy (threat T-58-02-04).
+serde_json = "1"
+
+[dev-dependencies]
+# The cache tests fabricate whole directories of payload/meta/orphan/temp files;
+# `TempDir` removes them on drop even when an assertion fails mid-test.
+tempfile = "3"

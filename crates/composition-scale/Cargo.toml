@@ -1,0 +1,84 @@
+[package]
+name = "composition-scale"
+version = "0.1.0"
+edition = "2021"
+description = "The ONE composition-scale compensation for a swapchain bound to a WinUI 3 SwapChainPanel: IDXGISwapChain2::SetMatrixTransform with the inverse-scale matrix. Takes a RAW COM pointer so it is wgpu-version-agnostic and can serve both of this repo's panel surfaces."
+publish = false
+license.workspace = true
+
+# ---------------------------------------------------------------------------
+# WHY THIS IS A CRATE AND NOT A FUNCTION IN AN EXISTING ONE (plan 52-12, F1b)
+# ---------------------------------------------------------------------------
+# Two consumers, on two different wgpu majors:
+#
+#   * `crates/ffi`             — wgpu 26 / windows-core 0.58 (the Preview surface)
+#   * `crates/timeline-render` — wgpu 29 / windows      0.62 (the Timeline surface)
+#
+# A shared helper taking `&wgpu::Surface` could serve only one of them; a COM
+# interface pointer is a COM interface pointer, because the `IDXGISwapChain2`
+# vtable layout is fixed by DXGI rather than by whichever Rust projection
+# produced the pointer. So the API is `*mut c_void` and this crate depends on
+# exactly ONE `windows` version.
+#
+# It is NOT in `crates/preview` and NOT in `crates/core`: both are under the
+# annotated tag `engine-axis-freeze` and may be CALLED, never MODIFIED. A leaf
+# crate is the only home that is available AND that a third panel surface can
+# reach.
+
+[lib]
+# rlib only. This is a library two cdylibs link, never a shipped artifact of its
+# own — a `cdylib` here would put a third DLL beside rudis_ffi.dll and
+# rudis_timeline.dll for no caller.
+crate-type = ["rlib"]
+
+# ---------------------------------------------------------------------------
+# TARGET-SCOPED, exactly as `crates/ffi/Cargo.toml` scopes its own panel halves.
+# SwapChainPanel hosting is Windows-only BY CONSTRUCTION (wgpu's
+# `SurfaceTargetUnsafe::SwapChainPanel` variant is `#[cfg(dx12)]`), so there is
+# nothing off Windows for this to talk to. `src/lib.rs` carries a non-Windows
+# twin that is an honest `Ok(())` no-op, so the Phase-8 macOS dev target still
+# compiles the workspace.
+# ---------------------------------------------------------------------------
+[target.'cfg(windows)'.dependencies]
+# `IDXGISwapChain2::SetMatrixTransform` + `DXGI_MATRIX_3X2_F` + the COM
+# `Interface`/`IUnknown` used to reach them from a raw pointer.
+#
+# EXACT PIN (`=`), the determinism rule `crates/timeline-render/Cargo.toml`
+# already applies to every one of its dependencies. 0.62.2 is not a choice: it
+# is the version `wgpu-hal 29.0.4` itself binds, so the `IDXGISwapChain3` that
+# crate hands out and the `IDXGISwapChain2` this one casts to are the SAME COM
+# ABI. A different major would be a second, silently incompatible vtable
+# projection on one pointer — undefined behaviour, not a compile error. (The
+# older consumer, `crates/ffi`, is on windows 0.58 and stays there; it reaches
+# this crate through `.as_raw()`, which is version-free.)
+#
+# ⚠ ALREADY IN `Cargo.lock` at exactly this version (`Cargo.lock:6785`), as a
+# transitive dependency of wgpu 29 — and its `gpu-allocator -> windows` edge is
+# HAND-PINNED to 0.62.2 (52-10 § 2.3, the first hand-edited resolution in this
+# repository). **NO new third-party code enters the graph; only a new DIRECT
+# edge.** Do NOT run `cargo update` to "tidy" this: it re-opens
+# `gpu-allocator 0.28.0`'s `windows = ">=0.53, <=0.62"` range and breaks the
+# wgpu-29 build with "multiple different versions of crate `windows`".
+#
+# Feature set is a SUBSET of what is already activated: wgpu-hal 29's own `dx12`
+# feature enables `Win32_Graphics_Dxgi_Common`, which itself enables
+# `Win32_Graphics_Dxgi` (windows-0.62.2/Cargo.toml:439). MIT OR Apache-2.0
+# (PROVENANCE.md Entry 28's table — cross-referenced, not re-transcribed).
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dxgi",
+] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# The QueryInterface rejection proof needs a REAL, live COM object that is
+# genuinely NOT a swapchain: `CreateStreamOnHGlobal` yields an `IStream*` with a
+# real vtable, so `E_NOINTERFACE` is observed against actual COM machinery
+# rather than against a stand-in written to agree with us. Mirrors the technique
+# and the exact version `crates/ffi` already uses for
+# `a_real_com_object_that_is_not_a_panel_is_rejected` — 0.59.0 is what this
+# workspace already resolves (`Cargo.lock:7049`), so no second major arrives.
+# Dev-only, never shipped. MIT OR Apache-2.0.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Com_StructuredStorage",
+] }
